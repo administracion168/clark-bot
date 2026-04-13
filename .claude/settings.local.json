@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\")",
+      "Bash(npm install:*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//Users/samuel/.nvm/versions/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(/usr/local/bin/npm install:*)",
+      "Bash(/opt/homebrew/bin/npm install:*)",
+      "Bash(ls /usr/local/bin/node*)",
+      "Bash(ls /opt/homebrew/bin/node*)",
+      "Bash(ls ~/.nvm/versions/node/*/bin/node)",
+      "Read(//Users/samuel/.volta/bin/**)",
+      "Bash(command -v node)",
+      "Read(//Users/samuel/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/8390593d-e338-491c-a2bc-5b54f660ab6a/1373f306-e62f-466b-935e-ef8312f6b08c/**)",
+      "Read(//Users/samuel/**)",
+      "Bash('/Users/samuel/Library/Application Support/com.raycast.macos/NodeJS/runtime/22.14.0/bin/node' --version)",
+      "Bash('/Users/samuel/Library/Application Support/com.raycast.macos/NodeJS/runtime/22.14.0/bin/npm' --version)",
+      "Bash(/opt/homebrew/bin/brew --version)",
+      "Bash(/opt/homebrew/bin/brew install:*)",
+      "Bash(/opt/homebrew/bin/brew unlink:*)",
+      "Bash(/opt/homebrew/bin/brew link:*)",
+      "Bash(/opt/homebrew/opt/node@22/bin/node --version)",
+      "Bash(/opt/homebrew/opt/node@22/bin/npm --version)",
+      "Bash(rm -rf node_modules package-lock.json)",
+      "Bash(/opt/homebrew/opt/node@22/bin/npm install:*)",
+      "Bash(/opt/homebrew/opt/node@22/bin/node src/deploy-commands.js)",
+      "Bash(timeout 10 /opt/homebrew/opt/node@22/bin/node src/index.js)",
+      "Bash(echo \"EXIT:$?\")"
+    ]
+  }
+}

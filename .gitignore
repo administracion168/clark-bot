@@ -1,0 +1,16 @@
+# Environment variables - NEVER subir a GitHub
+.env
+
+# Dependencias (se instalan en el servidor)
+node_modules/
+
+# Base de datos SQLite (se crea en el servidor)
+data/
+
+# macOS
+.DS_Store
+src/.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
