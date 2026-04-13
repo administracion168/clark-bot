@@ -7,7 +7,7 @@ const {
   EmbedBuilder,
 } = require('discord.js');
 const db = require('../database');
-const { resolveClarkRole } = require('../utils/roles');
+const { resolveClarkRole, getLogChannelId } = require('../utils/roles');
 const { toEST, toESTFull, formatDuration } = require('../utils/time');
 
 module.exports = {
@@ -91,9 +91,9 @@ module.exports = {
       ephemeral: true,
     });
 
-    // Post embed to log channel
+    // Post embed to the role-specific log channel (or shared fallback)
     try {
-      const logChannel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
+      const logChannel = await client.channels.fetch(getLogChannelId(emp?.role));
       const avatarURL = interaction.user.displayAvatarURL({ size: 64 });
 
       const roleLabel = emp?.role === 'chatter' ? '💬 Chatter' : '📣 Marketing';

@@ -13,6 +13,18 @@ for (const key of required) {
   }
 }
 
+// ── Optional: separate log channels per team ───────────────────────────────
+if (process.env.CHATTER_LOG_CHANNEL_ID) {
+  console.log('[Config] Chatter logs → dedicated channel (CHATTER_LOG_CHANNEL_ID)');
+} else {
+  console.log('[Config] Chatter logs → shared LOG_CHANNEL_ID (set CHATTER_LOG_CHANNEL_ID to separate)');
+}
+if (process.env.MARKETING_LOG_CHANNEL_ID) {
+  console.log('[Config] Marketing logs → dedicated channel (MARKETING_LOG_CHANNEL_ID)');
+} else {
+  console.log('[Config] Marketing logs → shared LOG_CHANNEL_ID (set MARKETING_LOG_CHANNEL_ID to separate)');
+}
+
 // ── Client setup ───────────────────────────────────────────────────────────
 const client = new Client({
   intents: [

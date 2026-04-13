@@ -19,4 +19,19 @@ function isAdmin(member) {
   return false;
 }
 
-module.exports = { resolveClarkRole, isAdmin };
+/**
+ * Return the correct log channel ID for a given Clark role.
+ * Uses CHATTER_LOG_CHANNEL_ID / MARKETING_LOG_CHANNEL_ID if set,
+ * otherwise falls back to the shared LOG_CHANNEL_ID.
+ */
+function getLogChannelId(role) {
+  if (role === 'chatter' && process.env.CHATTER_LOG_CHANNEL_ID) {
+    return process.env.CHATTER_LOG_CHANNEL_ID;
+  }
+  if (role === 'marketing' && process.env.MARKETING_LOG_CHANNEL_ID) {
+    return process.env.MARKETING_LOG_CHANNEL_ID;
+  }
+  return process.env.LOG_CHANNEL_ID;
+}
+
+module.exports = { resolveClarkRole, isAdmin, getLogChannelId };

@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const db = require('../database');
 const { sendWeeklyReport } = require('./report');
+const { getLogChannelId } = require('./roles');
 const { EmbedBuilder } = require('discord.js');
 
 /**
@@ -19,10 +20,10 @@ function startScheduler(client) {
         const closed = db.autoCloseShift(shift.id);
         console.log(`[AutoClose] Shift #${shift.id} for ${shift.discord_id} auto-closed.`);
 
-        // Post warning to log channel
+        // Post warning to the role-specific log channel (or shared fallback)
         try {
-          const logChannel = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
           const emp = db.getEmployee(shift.discord_id);
+          const logChannel = await client.channels.fetch(getLogChannelId(emp?.role));
 
           const embed = new EmbedBuilder()
             .setColor(0xe74c3c)
