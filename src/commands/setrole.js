@@ -1,9 +1,5 @@
 const {
   SlashCommandBuilder,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  ActionRowBuilder,
   PermissionFlagsBits,
 } = require('discord.js');
 const db = require('../database');
@@ -12,20 +8,26 @@ const { isAdmin } = require('../utils/roles');
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setrole')
-    .setDescription('(Admin) Set the Clark role for a user.')
+    .setDescription('(Admin) Set the Clark department for a user.')
     .addUserOption(opt =>
       opt.setName('user').setDescription('The user to update').setRequired(true)
     )
     .addStringOption(opt =>
-      opt.setName('role')
-        .setDescription('Role to assign')
+      opt.setName('department')
+        .setDescription('Department to assign')
         .setRequired(true)
-        .addChoices(
-          { name: 'Chatter', value: 'chatter' },
-          { name: 'Marketing', value: 'marketing' },
-        )
+        .setAutocomplete(true)
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  async handleAutocomplete(interaction) {
+    const focused = interaction.options.getFocused().toLowerCase();
+    const departments = db.getAllDepartments();
+    const choices = departments
+      .filter(d => d.name.includes(focused) || d.display_name.toLowerCase().includes(focused))
+      .map(d => ({ name: d.display_name, value: d.name }));
+    await interaction.respond(choices.slice(0, 25));
+  },
 
   async execute(interaction) {
     if (!isAdmin(interaction.member)) {
@@ -33,59 +35,19 @@ module.exports = {
     }
 
     const target = interaction.options.getUser('user');
-    const role = interaction.options.getString('role');
+    const deptName = interaction.options.getString('department');
+    const dept = db.getDepartment(deptName);
 
-    if (role === 'marketing') {
-      // Show modal to collect weekly salary
-      const modal = new ModalBuilder()
-        .setCustomId(`setrole_salary_${target.id}_${role}`)
-        .setTitle('Set Weekly Salary');
-
-      const salaryInput = new TextInputBuilder()
-        .setCustomId('weekly_salary')
-        .setLabel('Weekly Salary ($)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('e.g. 300.00')
-        .setRequired(true);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(salaryInput));
-      return interaction.showModal(modal);
-    }
-
-    // Chatter: no salary needed
-    db.setEmployeeRole(target.id, target.username, role, null);
-    return interaction.reply({
-      content: `✅ Role for **${target.username}** set to **${role}**.`,
-      ephemeral: true,
-    });
-  },
-
-  async handleModal(interaction) {
-    // customId: setrole_salary_{userId}_{role}
-    const parts = interaction.customId.split('_');
-    const userId = parts[2];
-    const role = parts[3];
-
-    const rawSalary = interaction.fields.getTextInputValue('weekly_salary').trim();
-    const salary = parseFloat(rawSalary);
-
-    if (isNaN(salary) || salary < 0) {
+    if (!dept) {
       return interaction.reply({
-        content: '❌ Invalid salary amount.',
+        content: `❌ Department **${deptName}** doesn't exist. Use \`/newdepartment\` to create it first.`,
         ephemeral: true,
       });
     }
 
-    // Fetch the username if we can; fall back to the stored username
-    let username = userId;
-    try {
-      const user = await interaction.client.users.fetch(userId);
-      username = user.username;
-    } catch (_) {}
-
-    db.setEmployeeRole(userId, username, role, salary);
+    db.setEmployeeRole(target.id, target.username, dept.name, null);
     return interaction.reply({
-      content: `✅ Role for **${username}** set to **${role}**. Weekly salary: **$${salary.toFixed(2)}**`,
+      content: `✅ **${target.username}** assigned to department **${dept.display_name}**.`,
       ephemeral: true,
     });
   },

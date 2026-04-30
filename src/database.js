@@ -16,7 +16,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS employees (
     discord_id TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK(role IN ('chatter', 'marketing')),
+    role       TEXT NOT NULL,
     weekly_salary REAL
   );
 
@@ -30,9 +30,80 @@ db.exec(`
     net_sales        REAL,
     auto_closed      INTEGER NOT NULL DEFAULT 0
   );
+
+  CREATE TABLE IF NOT EXISTS departments (
+    name            TEXT PRIMARY KEY,
+    display_name    TEXT NOT NULL,
+    pay_type        TEXT NOT NULL DEFAULT 'hours_only',
+    log_channel_id  TEXT,
+    chat_channel_id TEXT,
+    info_channel_id TEXT,
+    role_id         TEXT
+  );
 `);
 
-// ─── Employees ────────────────────────────────────────────────────────────────
+// ─── Migration: remove CHECK constraint from employees if present ──────────
+(function runMigrations() {
+  const tableInfo = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='employees'"
+  ).get();
+  if (tableInfo && tableInfo.sql && tableInfo.sql.includes('CHECK(role IN')) {
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(`CREATE TABLE employees_new (
+        discord_id TEXT PRIMARY KEY,
+        username   TEXT NOT NULL,
+        role       TEXT NOT NULL,
+        weekly_salary REAL
+      );`);
+      db.exec('INSERT INTO employees_new SELECT * FROM employees;');
+      db.exec('DROP TABLE employees;');
+      db.exec('ALTER TABLE employees_new RENAME TO employees;');
+    })();
+    db.pragma('foreign_keys = ON');
+    console.log('[DB] Migration: removed role CHECK constraint from employees.');
+  }
+})();
+
+// ─── Seed default departments on first run ────────────────────────────────
+(function seedDepartments() {
+  const count = db.prepare('SELECT COUNT(*) as c FROM departments').get().c;
+  if (count === 0) {
+    const ins = db.prepare(
+      'INSERT OR IGNORE INTO departments (name, display_name, pay_type) VALUES (?, ?, ?)'
+    );
+    ins.run('chatter', 'Chatter', 'commission');
+    ins.run('instagram', 'Instagram', 'hours_only');
+    ins.run('reddit', 'Reddit', 'hours_only');
+    ins.run('managers', 'Managers', 'hours_only');
+    console.log('[DB] Seeded default departments: chatter, instagram, reddit, managers.');
+  }
+})();
+
+// ─── Departments ──────────────────────────────────────────────────────────
+
+function getAllDepartments() {
+  return db.prepare('SELECT * FROM departments ORDER BY name ASC').all();
+}
+
+function getDepartment(name) {
+  return db.prepare('SELECT * FROM departments WHERE name = ?').get(name);
+}
+
+function createDepartment(name, displayName, payType, channels = {}) {
+  db.prepare(`
+    INSERT INTO departments (name, display_name, pay_type, log_channel_id, chat_channel_id, info_channel_id, role_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    name, displayName, payType,
+    channels.logChannelId ?? null,
+    channels.chatChannelId ?? null,
+    channels.infoChannelId ?? null,
+    channels.roleId ?? null,
+  );
+}
+
+// ─── Employees ────────────────────────────────────────────────────────────
 
 function upsertEmployee(discordId, username, role) {
   db.prepare(`
@@ -61,7 +132,7 @@ function setWeeklySalary(discordId, amount) {
   db.prepare('UPDATE employees SET weekly_salary = ? WHERE discord_id = ?').run(amount, discordId);
 }
 
-// ─── Shifts ───────────────────────────────────────────────────────────────────
+// ─── Shifts ───────────────────────────────────────────────────────────────
 
 function getOpenShift(discordId) {
   return db.prepare(`
@@ -109,7 +180,6 @@ function getAllOpenShifts() {
   return db.prepare('SELECT * FROM shifts WHERE clock_out IS NULL').all();
 }
 
-// Shifts for the current week (Mon 00:00 EST to now)
 function getWeekShifts(discordId, weekStart, weekEnd) {
   return db.prepare(`
     SELECT * FROM shifts
@@ -129,7 +199,6 @@ function getShiftHistory(discordId, sinceISO) {
   `).all(discordId, sinceISO);
 }
 
-// All employees with at least one shift in a date range (for weekly report)
 function getAllEmployeesWithShifts(weekStart, weekEnd) {
   return db.prepare(`
     SELECT DISTINCT e.*
@@ -144,10 +213,16 @@ function getAllEmployees() {
 }
 
 module.exports = {
+  // Departments
+  getAllDepartments,
+  getDepartment,
+  createDepartment,
+  // Employees
   upsertEmployee,
   getEmployee,
   setEmployeeRole,
   setWeeklySalary,
+  // Shifts
   getOpenShift,
   clockIn,
   clockOut,

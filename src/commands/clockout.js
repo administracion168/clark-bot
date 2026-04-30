@@ -20,12 +20,11 @@ module.exports = {
 
     if (!clarkRole) {
       return interaction.reply({
-        content: "You don't have a valid role assigned. Please contact an admin.",
+        content: "You don't have a valid department assigned. Please contact an admin.",
         ephemeral: true,
       });
     }
 
-    // Sync employee record
     db.upsertEmployee(interaction.user.id, interaction.user.username, clarkRole);
 
     const open = db.getOpenShift(interaction.user.id);
@@ -35,6 +34,8 @@ module.exports = {
         ephemeral: true,
       });
     }
+
+    const dept = db.getDepartment(clarkRole);
 
     // Build modal
     const modal = new ModalBuilder()
@@ -50,7 +51,8 @@ module.exports = {
 
     modal.addComponents(new ActionRowBuilder().addComponents(summaryInput));
 
-    if (clarkRole === 'chatter') {
+    // Only commission departments need to report net sales
+    if (dept?.pay_type === 'commission') {
       const salesInput = new TextInputBuilder()
         .setCustomId('net_sales')
         .setLabel('Net Sales ($)')
@@ -63,16 +65,15 @@ module.exports = {
     await interaction.showModal(modal);
   },
 
-  // Called from interactionCreate when modal is submitted
   async handleModal(interaction, client) {
-    // Extract shift ID from custom ID: "clockout_modal_{shiftId}"
     const shiftId = parseInt(interaction.customId.split('_')[2], 10);
-
     const summary = interaction.fields.getTextInputValue('summary').trim();
     let netSales = null;
 
     const emp = db.getEmployee(interaction.user.id);
-    if (emp?.role === 'chatter') {
+    const dept = db.getDepartment(emp?.role);
+
+    if (dept?.pay_type === 'commission') {
       const rawSales = interaction.fields.getTextInputValue('net_sales').trim();
       netSales = parseFloat(rawSales);
       if (isNaN(netSales) || netSales < 0) {
@@ -85,23 +86,21 @@ module.exports = {
 
     const shift = db.clockOut(shiftId, summary, netSales);
 
-    // Ephemeral confirmation
     await interaction.reply({
       content: `🔴 Clocked out — Shift duration: **${formatDuration(shift.duration_minutes)}**. Thanks!`,
       ephemeral: true,
     });
 
-    // Post embed to the role-specific log channel (or shared fallback)
+    // Post embed to the department log channel
     try {
       const logChannel = await client.channels.fetch(getLogChannelId(emp?.role));
       const avatarURL = interaction.user.displayAvatarURL({ size: 64 });
-
-      const roleLabel = emp?.role === 'chatter' ? '💬 Chatter' : '📣 Marketing';
+      const deptLabel = dept?.display_name ?? emp?.role ?? 'Employee';
       const color = shift.auto_closed ? 0xe74c3c : 0x2ecc71;
 
       const embed = new EmbedBuilder()
         .setColor(color)
-        .setAuthor({ name: `${interaction.user.username} — ${roleLabel}`, iconURL: avatarURL })
+        .setAuthor({ name: `${interaction.user.username} — ${deptLabel}`, iconURL: avatarURL })
         .addFields(
           { name: 'Clock In', value: toESTFull(shift.clock_in), inline: true },
           { name: 'Clock Out', value: toESTFull(shift.clock_out), inline: true },
@@ -109,7 +108,7 @@ module.exports = {
           { name: 'Shift Summary', value: summary },
         );
 
-      if (emp?.role === 'chatter' && netSales !== null) {
+      if (dept?.pay_type === 'commission' && netSales !== null) {
         embed.addFields({ name: 'Net Sales', value: `$${netSales.toFixed(2)}`, inline: true });
       }
 

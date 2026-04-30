@@ -54,9 +54,9 @@ function startScheduler(client) {
     }
   });
 
-  // ── Weekly report: every Monday at 03:00 AM EST (= 08:00 UTC) ─────────────
+  // ── Weekly report: every Monday at 09:00 AM EST (= 14:00 UTC) ─────────────
   // Cron runs in server local time — we schedule in UTC explicitly
-  cron.schedule('0 8 * * 1', async () => {
+  cron.schedule('0 14 * * 1', async () => {
     console.log('[Scheduler] Sending weekly report...');
     try {
       await sendWeeklyReport(client);
@@ -65,7 +65,7 @@ function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
-  console.log('[Scheduler] Jobs started: auto-close (hourly), weekly report (Mon 03:00 EST).');
+  console.log('[Scheduler] Jobs started: auto-close (hourly), weekly report (Mon 09:00 EST).');
 }
 
 module.exports = { startScheduler };

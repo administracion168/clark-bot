@@ -4,6 +4,19 @@ const setRoleCmd = require('../commands/setrole');
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction, client) {
+    // ── Autocomplete ───────────────────────────────────────────────────────
+    if (interaction.isAutocomplete()) {
+      const command = client.commands.get(interaction.commandName);
+      if (command?.handleAutocomplete) {
+        try {
+          await command.handleAutocomplete(interaction);
+        } catch (err) {
+          console.error('[Autocomplete] Error:', err);
+        }
+      }
+      return;
+    }
+
     // ── Slash commands ─────────────────────────────────────────────────────
     if (interaction.isChatInputCommand()) {
       const command = client.commands.get(interaction.commandName);

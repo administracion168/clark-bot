@@ -1,12 +1,17 @@
+const db = require('../database');
+
 /**
- * Resolve a guild member's Clark role ("chatter" or "marketing") from their Discord roles.
- * Returns null if they have neither.
+ * Resolve a guild member's Clark department from their Discord roles.
+ * Checks dynamically against the departments table.
+ * Returns the department name (lowercase) or null if none found.
  */
 function resolveClarkRole(member) {
-  const roleNames = member.roles.cache.map(r => r.name.toLowerCase());
-  if (roleNames.includes('chatter')) return 'chatter';
-  if (roleNames.includes('marketing')) return 'marketing';
-  return null;
+  const departments = db.getAllDepartments();
+  const deptNames = new Set(departments.map(d => d.name.toLowerCase()));
+  const memberRoleName = member.roles.cache
+    .map(r => r.name.toLowerCase())
+    .find(r => deptNames.has(r));
+  return memberRoleName ?? null;
 }
 
 /**
@@ -21,15 +26,12 @@ function isAdmin(member) {
 
 /**
  * Return the correct log channel ID for a given Clark role.
- * Uses CHATTER_LOG_CHANNEL_ID / MARKETING_LOG_CHANNEL_ID if set,
- * otherwise falls back to the shared LOG_CHANNEL_ID.
+ * Looks up the department's dedicated log_channel_id, falls back to LOG_CHANNEL_ID.
  */
 function getLogChannelId(role) {
-  if (role === 'chatter' && process.env.CHATTER_LOG_CHANNEL_ID) {
-    return process.env.CHATTER_LOG_CHANNEL_ID;
-  }
-  if (role === 'marketing' && process.env.MARKETING_LOG_CHANNEL_ID) {
-    return process.env.MARKETING_LOG_CHANNEL_ID;
+  if (role) {
+    const dept = db.getDepartment(role);
+    if (dept?.log_channel_id) return dept.log_channel_id;
   }
   return process.env.LOG_CHANNEL_ID;
 }
