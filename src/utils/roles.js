@@ -30,9 +30,14 @@ function isAdmin(member) {
  */
 function getLogChannelId(role) {
   if (role) {
+    // 1. Department has a dedicated log channel stored in DB (set via /newdepartment)
     const dept = db.getDepartment(role);
     if (dept?.log_channel_id) return dept.log_channel_id;
+    // 2. Legacy env var fallback (e.g. CHATTER_LOG_CHANNEL_ID)
+    const envKey = `${role.toUpperCase()}_LOG_CHANNEL_ID`;
+    if (process.env[envKey]) return process.env[envKey];
   }
+  // 3. Shared fallback
   return process.env.LOG_CHANNEL_ID;
 }
 
