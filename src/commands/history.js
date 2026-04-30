@@ -68,13 +68,24 @@ module.exports = {
       return `**${i + 1}. ${date}** — ${dur}${autoTag}\n> ${clockIn} → ${clockOut}${salesLine}${summaryLine}`;
     });
 
-    // Discord embed field value limit is 1024 chars; paginate if needed
-    const CHUNK_SIZE = 4;
-    for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
-      const chunk = lines.slice(i, i + CHUNK_SIZE).join('\n\n');
+    // Split lines into chunks that respect Discord's 1024-char field limit
+    const chunks = [];
+    let current = '';
+    for (const line of lines) {
+      const next = current ? '\n\n' + line : line;
+      if (current && (current + next).length > 1024) {
+        chunks.push(current);
+        current = line;
+      } else {
+        current += next;
+      }
+    }
+    if (current) chunks.push(current);
+
+    for (let i = 0; i < chunks.length; i++) {
       embed.addFields({
         name: i === 0 ? 'Shifts' : '\u200B',
-        value: chunk.slice(0, 1024),
+        value: chunks[i],
       });
     }
 

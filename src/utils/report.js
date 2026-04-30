@@ -3,6 +3,45 @@ const db = require('../database');
 const { toESTDate, toESTFull, formatDuration, getPreviousWeekBounds } = require('./time');
 
 /**
+ * Split an array of lines into chunks that fit within maxLen characters.
+ */
+function chunkByLength(lines, maxLen = 1024, separator = '\n') {
+  const chunks = [];
+  let current = '';
+  for (const line of lines) {
+    const next = current ? separator + line : line;
+    if (current && (current + next).length > maxLen) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current += next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+
+/**
+ * Split an array of lines into chunks that fit within maxLen characters.
+ */
+function chunkByLength(lines, maxLen = 1024, separator = '\n') {
+  const chunks = [];
+  let current = '';
+  for (const line of lines) {
+    const next = current ? separator + line : line;
+    if (current && (current + next).length > maxLen) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current += next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/**
  * Build and send the weekly report to the report channel.
  * @param {import('discord.js').Client} client
  * @param {object} [bounds] — optional override; defaults to previous week
@@ -101,8 +140,11 @@ async function sendWeeklyReport(client, bounds) {
           { name: 'Avg Sales/Shift', value: `$${avgSales.toFixed(2)}`, inline: true },
           { name: '\u200B', value: '\u200B', inline: true },
         )
-        .addFields({ name: 'Shift Summaries', value: shiftLines || '—' })
-        .addFields({ name: '\u200B', value: payLine });
+      const shiftChunks = chunkByLength(shiftLines ? shiftLines.split('\n') : ['—']);
+      for (let ci = 0; ci < shiftChunks.length; ci++) {
+        embed.addFields({ name: ci === 0 ? 'Shift Summaries' : '\u200B', value: shiftChunks[ci] });
+      }
+      embed.addFields({ name: '\u200B', value: payLine });
     } else {
       // Marketing
       const payment = emp.weekly_salary ?? 0;
@@ -118,8 +160,11 @@ async function sendWeeklyReport(client, bounds) {
           { name: 'Total Hours', value: formatDuration(totalMinutes), inline: true },
           { name: 'Avg Hours/Shift', value: formatDuration(Math.round(avgHours * 60)), inline: true },
         )
-        .addFields({ name: 'Shift Summaries', value: shiftLines || '—' })
-        .addFields({ name: '\u200B', value: payLine });
+      const shiftChunksM = chunkByLength(shiftLines ? shiftLines.split('\n') : ['—']);
+      for (let ci = 0; ci < shiftChunksM.length; ci++) {
+        embed.addFields({ name: ci === 0 ? 'Shift Summaries' : '\u200B', value: shiftChunksM[ci] });
+      }
+      embed.addFields({ name: '\u200B', value: payLine });
     }
 
     embeds.push(embed);
