@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   ChannelType,
   PermissionsBitField,
+  EmbedBuilder,
 } = require('discord.js');
 const db = require('../database');
 const { isAdmin } = require('../utils/roles');
@@ -39,7 +40,6 @@ module.exports = {
     const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
     const guild = interaction.guild;
 
-    // Check if department already exists
     if (db.getDepartment(rawName)) {
       return interaction.editReply(`❌ Department **${rawName}** already exists.`);
     }
@@ -52,8 +52,9 @@ module.exports = {
         reason: `Clark bot: new department "${rawName}" created by ${interaction.user.username}`,
       });
 
-      // 2. Create category (hidden from @everyone, visible to the new role)
       const everyoneId = guild.roles.everyone.id;
+
+      // 2. Create category
       const category = await guild.channels.create({
         name: displayName.toUpperCase(),
         type: ChannelType.GuildCategory,
@@ -119,6 +120,50 @@ module.exports = {
         roleId: discordRole.id,
       });
 
+      // 7. Post pinned instructions in logs channel
+      const salesField = payType === 'commission'
+        ? '\n> 💰 **Net Sales** — total sales closed during the shift\n'
+        : '';
+
+      const logsEmbed = new EmbedBuilder()
+        .setColor(0x2ecc71)
+        .setTitle(`📋 ${displayName} — Shift Logs`)
+        .setDescription(
+          `This channel is **read-only**. Clark posts here automatically every time a member of **${displayName}** clocks in or out.\n​`
+        )
+        .addFields(
+          {
+            name: '🟢 Clock In — `/clockin`',
+            value:
+              'Run this command at the **start of your shift**.\n' +
+              'Clark will record your start time automatically.',
+          },
+          {
+            name: '🔴 Clock Out — `/clockout`',
+            value:
+              'Run this command at the **end of your shift**.\n' +
+              'A form will appear asking you to fill in:\n' +
+              '> 📝 **Shift Summary** — describe what you worked on\n' +
+              salesField +
+              '\nOnce submitted, Clark posts the full shift log here.',
+          },
+          {
+            name: '⚠️ Auto-Close',
+            value:
+              'If you forget to clock out, Clark will **automatically close your shift after 12 hours** and flag it here.',
+          },
+          {
+            name: '📊 Weekly Report',
+            value:
+              'Every **Monday at 9:00 AM EST** Clark sends a full team report to the report channel with all shifts from the previous week.',
+          },
+        )
+        .setFooter({ text: `Department: ${displayName}  •  Pay type: ${payType === 'commission' ? '$2/hr + 4% commission' : 'Hours only'}` })
+        .setTimestamp();
+
+      const pinnedMsg = await logsChannel.send({ embeds: [logsEmbed] });
+      await pinnedMsg.pin();
+
       const payLabel = payType === 'commission' ? '$2/hr + 4% commission' : 'Hours only (manual pay)';
 
       return interaction.editReply(
@@ -126,7 +171,7 @@ module.exports = {
         `🎭 Role: ${discordRole}\n` +
         `📁 Category: **${displayName.toUpperCase()}**\n` +
         `💬 Chat: ${chatChannel}\n` +
-        `📋 Logs: ${logsChannel}\n` +
+        `📋 Logs: ${logsChannel} *(pinned instructions posted)*\n` +
         `ℹ️ Info: ${infoChannel}\n` +
         `💰 Pay type: ${payLabel}\n\n` +
         `Use \`/setrole\` to assign employees to this department.`
