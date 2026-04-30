@@ -65,18 +65,19 @@ db.exec(`
   }
 })();
 
-// ─── Seed default departments on first run ────────────────────────────────
+// ─── Seed chatter department (the only built-in dept) ────────────────────
 (function seedDepartments() {
-  const count = db.prepare('SELECT COUNT(*) as c FROM departments').get().c;
-  if (count === 0) {
-    const ins = db.prepare(
-      'INSERT OR IGNORE INTO departments (name, display_name, pay_type) VALUES (?, ?, ?)'
-    );
-    ins.run('chatter', 'Chatter', 'commission');
-    ins.run('instagram', 'Instagram', 'hours_only');
-    ins.run('reddit', 'Reddit', 'hours_only');
-    ins.run('managers', 'Managers', 'hours_only');
-    console.log('[DB] Seeded default departments: chatter, instagram, reddit, managers.');
+  db.prepare(
+    'INSERT OR IGNORE INTO departments (name, display_name, pay_type) VALUES (?, ?, ?)'
+  ).run('chatter', 'Chatter', 'commission');
+
+  // Remove any departments that were auto-seeded without Discord resources
+  // (no role_id means they were never properly created via /newdepartment)
+  const removed = db.prepare(
+    "DELETE FROM departments WHERE name != 'chatter' AND role_id IS NULL"
+  ).run();
+  if (removed.changes > 0) {
+    console.log(`[DB] Removed ${removed.changes} incomplete department(s) with no Discord role.`);
   }
 })();
 
@@ -88,6 +89,10 @@ function getAllDepartments() {
 
 function getDepartment(name) {
   return db.prepare('SELECT * FROM departments WHERE name = ?').get(name);
+}
+
+function deleteDepartment(name) {
+  db.prepare('DELETE FROM departments WHERE name = ?').run(name);
 }
 
 function createDepartment(name, displayName, payType, channels = {}) {
@@ -217,6 +222,7 @@ module.exports = {
   getAllDepartments,
   getDepartment,
   createDepartment,
+  deleteDepartment,
   // Employees
   upsertEmployee,
   getEmployee,
