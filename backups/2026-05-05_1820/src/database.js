@@ -71,29 +71,14 @@ db.exec(`
     'INSERT OR IGNORE INTO departments (name, display_name, pay_type) VALUES (?, ?, ?)'
   ).run('chatter', 'Chatter', 'commission');
 
-  // Departments are never auto-deleted on startup.
-  // Use /deletedepartment to remove a department manually.
-
-  // Seed reddit department with its fixed log channel
-  db.prepare(`
-    INSERT OR IGNORE INTO departments (name, display_name, pay_type, log_channel_id)
-    VALUES ('reddit', 'Reddit', 'hours_only', '1499560679802404924')
-  `).run();
-  // Always force the correct log channel for reddit (in case it was changed or corrupted)
-  db.prepare(`
-    UPDATE departments SET log_channel_id = '1499560679802404924'
-    WHERE name = 'reddit'
-  `).run();
-
-  // Ensure Instagram department exists and has the correct Discord role_id
-  db.prepare(`
-    INSERT OR IGNORE INTO departments (name, display_name, pay_type, role_id)
-    VALUES ('instagram', 'Instagram', 'hours_only', '1502096268271554590')
-  `).run();
-  db.prepare(`
-    UPDATE departments SET role_id = '1502096268271554590'
-    WHERE name = 'instagram'
-  `).run();
+  // Remove any departments that were auto-seeded without Discord resources
+  // (no role_id means they were never properly created via /newdepartment)
+  const removed = db.prepare(
+    "DELETE FROM departments WHERE name != 'chatter' AND role_id IS NULL"
+  ).run();
+  if (removed.changes > 0) {
+    console.log(`[DB] Removed ${removed.changes} incomplete department(s) with no Discord role.`);
+  }
 })();
 
 // ─── Departments ──────────────────────────────────────────────────────────
@@ -323,91 +308,8 @@ function deleteModel(id) {
   db.prepare('DELETE FROM models WHERE id = ?').run(id);
 }
 
-function deactivateModel(id) {
-  db.prepare(
-    'UPDATE models SET linked = 0, telegram_chat_id = NULL, link_code = NULL WHERE id = ?'
-  ).run(id);
-}
-
 // Migration: add language column if it doesn't exist yet
 try { db.exec("ALTER TABLE models ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"); } catch (_) {}
-
-// ─── Ideas ────────────────────────────────────────────────────────────────────
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS ideas (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    model_id            INTEGER NOT NULL REFERENCES models(id),
-    type                TEXT NOT NULL,
-    link                TEXT NOT NULL,
-    notes               TEXT,
-    status              TEXT NOT NULL DEFAULT 'pending',
-    created_at          TEXT NOT NULL,
-    completed_at        TEXT,
-    telegram_message_id TEXT,
-    airtable_record_id  TEXT
-  );
-`);
-
-function createIdea({ modelId, type, link, notes }) {
-  const now = new Date().toISOString();
-  const info = db.prepare(`
-    INSERT INTO ideas (model_id, type, link, notes, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(modelId, type, link, notes || null, now);
-  return db.prepare('SELECT * FROM ideas WHERE id = ?').get(info.lastInsertRowid);
-}
-
-function getIdea(id) {
-  return db.prepare('SELECT * FROM ideas WHERE id = ?').get(id);
-}
-
-function getModelPendingIdeas(modelId) {
-  return db.prepare(`
-    SELECT * FROM ideas WHERE model_id = ? AND status = 'pending'
-    ORDER BY created_at ASC
-  `).all(modelId);
-}
-
-function getModelAllIdeas(modelId) {
-  return db.prepare(`
-    SELECT * FROM ideas WHERE model_id = ?
-    ORDER BY created_at DESC
-  `).all(modelId);
-}
-
-function completeIdea(id) {
-  const now = new Date().toISOString();
-  db.prepare(`
-    UPDATE ideas SET status = 'completed', completed_at = ? WHERE id = ?
-  `).run(now, id);
-  return db.prepare('SELECT * FROM ideas WHERE id = ?').get(id);
-}
-
-function updateIdeaAirtableId(id, airtableRecordId) {
-  db.prepare('UPDATE ideas SET airtable_record_id = ? WHERE id = ?').run(airtableRecordId, id);
-}
-
-function updateIdeaTelegramMessageId(id, telegramMessageId) {
-  db.prepare('UPDATE ideas SET telegram_message_id = ? WHERE id = ?').run(telegramMessageId, id);
-}
-
-// ─── Config (key/value store for bot settings) ────────────────────────────────
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS config (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-`);
-
-function getConfig(key) {
-  return db.prepare('SELECT value FROM config WHERE key = ?').get(key)?.value ?? null;
-}
-
-function setConfig(key, value) {
-  db.prepare('INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)').run(key, value);
-}
 
 // ── Ticket functions ──────────────────────────────────────────────────────────
 
@@ -463,38 +365,6 @@ function getTicketMessages(ticketId) {
   return db.prepare('SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC').all(ticketId);
 }
 
-function getAllTickets({ status = null, modelId = null, limit = 25, offset = 0 } = {}) {
-  let query = `
-    SELECT t.*, m.name AS model_name
-    FROM tickets t
-    LEFT JOIN models m ON m.id = t.model_id
-    WHERE 1=1
-  `;
-  const params = [];
-  if (status) { query += ' AND t.status = ?'; params.push(status); }
-  if (modelId) { query += ' AND t.model_id = ?'; params.push(modelId); }
-  query += ' ORDER BY t.created_at DESC LIMIT ? OFFSET ?';
-  params.push(limit, offset);
-  return db.prepare(query).all(...params);
-}
-
-function getTicketByNumber(ticketNumber) {
-  return db.prepare(`
-    SELECT t.*, m.name AS model_name
-    FROM tickets t
-    LEFT JOIN models m ON m.id = t.model_id
-    WHERE t.ticket_number = ?
-  `).get(ticketNumber);
-}
-
-function countAllTickets({ status = null, modelId = null } = {}) {
-  let query = 'SELECT COUNT(*) as c FROM tickets t WHERE 1=1';
-  const params = [];
-  if (status) { query += ' AND t.status = ?'; params.push(status); }
-  if (modelId) { query += ' AND t.model_id = ?'; params.push(modelId); }
-  return db.prepare(query).get(...params).c;
-}
-
 module.exports = {
   // Departments
   getAllDepartments,
@@ -512,7 +382,6 @@ module.exports = {
   linkModelTelegram,
   setModelLanguage,
   deleteModel,
-  deactivateModel,
   // Tickets
   createTicket,
   getTicket,
@@ -522,20 +391,6 @@ module.exports = {
   updateTicketStatus,
   addTicketMessage,
   getTicketMessages,
-  getAllTickets,
-  countAllTickets,
-  getTicketByNumber,
-  // Ideas
-  createIdea,
-  getIdea,
-  getModelPendingIdeas,
-  getModelAllIdeas,
-  completeIdea,
-  updateIdeaAirtableId,
-  updateIdeaTelegramMessageId,
-  // Config
-  getConfig,
-  setConfig,
   // Employees
   upsertEmployee,
   getEmployee,

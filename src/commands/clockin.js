@@ -1,6 +1,6 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const db = require('../database');
-const { resolveClarkRole } = require('../utils/roles');
+const { resolveClarkRole, getLogChannelId } = require('../utils/roles');
 const { toEST } = require('../utils/time');
 
 module.exports = {
@@ -9,7 +9,23 @@ module.exports = {
     .setDescription('Clock in to start your shift.'),
 
   async execute(interaction) {
-    const clarkRole = resolveClarkRole(interaction.member);
+    let clarkRole = resolveClarkRole(interaction.member);
+
+    // Fallback 1: roles.cache may be empty for uncached members after a bot restart.
+    // Re-fetch the member from Discord to get a fresh role list.
+    if (!clarkRole) {
+      try {
+        const freshMember = await interaction.guild.members.fetch(interaction.user.id);
+        clarkRole = resolveClarkRole(freshMember);
+      } catch (_) {}
+    }
+
+    // Fallback 2: if role still not found, check if admin already assigned
+    // this employee to a department manually via /setrole
+    if (!clarkRole) {
+      const stored = db.getEmployee(interaction.user.id);
+      if (stored?.role) clarkRole = stored.role;
+    }
 
     if (!clarkRole) {
       return interaction.reply({
@@ -33,9 +49,28 @@ module.exports = {
     db.clockIn(interaction.user.id);
     const now = new Date();
 
-    return interaction.reply({
+    await interaction.reply({
       content: `🟢 Clocked in at **${toEST(now)}** — Have a great shift!`,
       ephemeral: true,
     });
+
+    // Post public clock-in notification to the department log channel
+    try {
+      const dept = db.getDepartment(clarkRole);
+      const logChannel = await interaction.client.channels.fetch(getLogChannelId(clarkRole));
+      const avatarURL = interaction.user.displayAvatarURL({ size: 64 });
+      const deptLabel = dept?.display_name ?? clarkRole;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x2ecc71)
+        .setAuthor({ name: `${interaction.user.username} — ${deptLabel}`, iconURL: avatarURL })
+        .setDescription(`🟢 **${interaction.user.username}** has clocked in.`)
+        .addFields({ name: 'Clock In', value: toEST(now), inline: true })
+        .setTimestamp();
+
+      await logChannel.send({ embeds: [embed] });
+    } catch (err) {
+      console.error('[Clockin] Failed to post log embed:', err.message);
+    }
   },
 };

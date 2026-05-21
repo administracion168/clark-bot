@@ -16,22 +16,7 @@ module.exports = {
     .setDescription('Clock out and submit your shift summary.'),
 
   async execute(interaction) {
-    let clarkRole = resolveClarkRole(interaction.member);
-
-    // Fallback 1: roles.cache may be empty for uncached members after a bot restart.
-    // Re-fetch the member from Discord to get a fresh role list.
-    if (!clarkRole) {
-      try {
-        const freshMember = await interaction.guild.members.fetch(interaction.user.id);
-        clarkRole = resolveClarkRole(freshMember);
-      } catch (_) {}
-    }
-
-    // Fallback 2: if role still not found, use stored DB record
-    if (!clarkRole) {
-      const stored = db.getEmployee(interaction.user.id);
-      if (stored?.role) clarkRole = stored.role;
-    }
+    const clarkRole = resolveClarkRole(interaction.member);
 
     if (!clarkRole) {
       return interaction.reply({

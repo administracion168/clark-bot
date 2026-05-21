@@ -1,48 +1,10 @@
 const { EmbedBuilder } = require('discord.js');
 const db = require('../database');
-const { toESTDate, toESTFull, formatDuration, getPreviousWeekBounds } = require('./time');
-
-/**
- * Split an array of lines into chunks that fit within maxLen characters.
- */
-function chunkByLength(lines, maxLen = 1024, separator = '\n') {
-  const chunks = [];
-  let current = '';
-  for (const line of lines) {
-    const next = current ? separator + line : line;
-    if (current && (current + next).length > maxLen) {
-      chunks.push(current);
-      current = line;
-    } else {
-      current += next;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
-
-/**
- * Split an array of lines into chunks that fit within maxLen characters.
- */
-function chunkByLength(lines, maxLen = 1024, separator = '\n') {
-  const chunks = [];
-  let current = '';
-  for (const line of lines) {
-    const next = current ? separator + line : line;
-    if (current && (current + next).length > maxLen) {
-      chunks.push(current);
-      current = line;
-    } else {
-      current += next;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
+const { formatDuration, getPreviousWeekBounds } = require('./time');
 
 /**
  * Build and send the weekly report to the report channel.
+ * Shows a single summary embed: total hours + total sales for the week.
  * @param {import('discord.js').Client} client
  * @param {object} [bounds] — optional override; defaults to previous week
  */
@@ -70,186 +32,55 @@ async function sendWeeklyReport(client, bounds) {
     return;
   }
 
-  // ── Previous week for comparison ──────────────────────────────────────────
-  const prevStart = new Date(new Date(start).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const prevEnd = new Date(new Date(end).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  // ── Aggregate totals across all employees ─────────────────────────────────
+  let totalMinutes = 0;
+  let totalSales   = 0;
 
-  // ── Aggregate all employees ────────────────────────────────────────────────
-  let totalChatterPay = 0;
-  let totalChatterHourly = 0;
-  let totalChatterCommission = 0;
-  let totalMarketingPay = 0;
-  let totalTeamMinutes = 0;
-  let totalNetSales = 0;
-
-  const embeds = [];
-
-  // Header embed
-  embeds.push(
-    new EmbedBuilder()
-      .setColor(0x2ecc71)
-      .setTitle(`📊 Weekly Report — ${label}`)
-      .setDescription(`Report generated <t:${Math.floor(Date.now() / 1000)}:F>`)
-      .setTimestamp()
-  );
+  // Per-employee rows for the breakdown field
+  const rows = [];
 
   for (const emp of employees) {
     const shifts = db.getWeekShifts(emp.discord_id, start, end);
-    const totalMinutes = shifts.reduce((s, sh) => s + (sh.duration_minutes ?? 0), 0);
-    const totalHours = totalMinutes / 60;
-    const avgHours = shifts.length > 0 ? totalHours / shifts.length : 0;
+    const empMinutes = shifts.reduce((s, sh) => s + (sh.duration_minutes ?? 0), 0);
+    const empSales   = shifts.reduce((s, sh) => s + (sh.net_sales ?? 0), 0);
 
-    totalTeamMinutes += totalMinutes;
+    totalMinutes += empMinutes;
+    totalSales   += empSales;
 
-    // Build shift list
-    const shiftLines = shifts.map((sh, i) => {
-      const date = toESTDate(sh.clock_in);
-      const dur = formatDuration(sh.duration_minutes ?? 0);
-      const autoTag = sh.auto_closed ? ' ⚠️ AUTO-CLOSED' : '';
-      const salesLine = emp.role === 'chatter' && sh.net_sales != null
-        ? ` | Sales: $${sh.net_sales.toFixed(2)}`
-        : '';
-      return `**${i + 1}.** ${date} (${dur})${salesLine}${autoTag}\n> ${sh.summary ?? '—'}`;
-    }).join('\n');
+    const dept = db.getDepartment(emp.role);
+    const isCommission = dept?.pay_type === 'commission';
 
-    let payLine = '';
-    let embed;
-
-    if (emp.role === 'chatter') {
-      const sales = shifts.reduce((s, sh) => s + (sh.net_sales ?? 0), 0);
-      const avgSales = shifts.length > 0 ? sales / shifts.length : 0;
-      const hourly = 2 * totalHours;
-      const commission = 0.04 * sales;
-      const payment = hourly + commission;
-
-      totalNetSales += sales;
-      totalChatterHourly += hourly;
-      totalChatterCommission += commission;
-      totalChatterPay += payment;
-
-      payLine = `💰 **Payment due: ($2 × ${totalHours.toFixed(2)}h) + (4% × $${sales.toFixed(2)}) = $${payment.toFixed(2)}**`;
-
-      embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setAuthor({ name: `💬 ${emp.username} — Chatter` })
-        .addFields(
-          { name: 'Shifts', value: String(shifts.length), inline: true },
-          { name: 'Total Hours', value: formatDuration(totalMinutes), inline: true },
-          { name: 'Avg Hours/Shift', value: formatDuration(Math.round(avgHours * 60)), inline: true },
-          { name: 'Total Net Sales', value: `$${sales.toFixed(2)}`, inline: true },
-          { name: 'Avg Sales/Shift', value: `$${avgSales.toFixed(2)}`, inline: true },
-          { name: '\u200B', value: '\u200B', inline: true },
-        )
-      const shiftChunks = chunkByLength(shiftLines ? shiftLines.split('\n') : ['—']);
-      for (let ci = 0; ci < shiftChunks.length; ci++) {
-        embed.addFields({ name: ci === 0 ? 'Shift Summaries' : '\u200B', value: shiftChunks[ci] });
-      }
-      embed.addFields({ name: '\u200B', value: payLine });
-    } else {
-      // Marketing
-      const payment = emp.weekly_salary ?? 0;
-      totalMarketingPay += payment;
-
-      payLine = `💰 **Payment due: $${payment.toFixed(2)} (fixed weekly salary)**`;
-
-      embed = new EmbedBuilder()
-        .setColor(0x9b59b6)
-        .setAuthor({ name: `📣 ${emp.username} — Marketing` })
-        .addFields(
-          { name: 'Shifts', value: String(shifts.length), inline: true },
-          { name: 'Total Hours', value: formatDuration(totalMinutes), inline: true },
-          { name: 'Avg Hours/Shift', value: formatDuration(Math.round(avgHours * 60)), inline: true },
-        )
-      const shiftChunksM = chunkByLength(shiftLines ? shiftLines.split('\n') : ['—']);
-      for (let ci = 0; ci < shiftChunksM.length; ci++) {
-        embed.addFields({ name: ci === 0 ? 'Shift Summaries' : '\u200B', value: shiftChunksM[ci] });
-      }
-      embed.addFields({ name: '\u200B', value: payLine });
-    }
-
-    embeds.push(embed);
+    const salesPart = isCommission ? ` | Sales: $${empSales.toFixed(2)}` : '';
+    rows.push(`• **${emp.username}** — ${formatDuration(empMinutes)}${salesPart}`);
   }
 
-  // ── Payroll & Agency Summary ───────────────────────────────────────────────
-  const totalPay = totalChatterPay + totalMarketingPay;
-
-  // Previous week stats for comparison
-  const prevEmployees = db.getAllEmployeesWithShifts(prevStart, prevEnd);
-  let prevMinutes = 0;
-  let prevSales = 0;
-  for (const emp of prevEmployees) {
-    const shifts = db.getWeekShifts(emp.discord_id, prevStart, prevEnd);
-    prevMinutes += shifts.reduce((s, sh) => s + (sh.duration_minutes ?? 0), 0);
-    if (emp.role === 'chatter') {
-      prevSales += shifts.reduce((s, sh) => s + (sh.net_sales ?? 0), 0);
-    }
-  }
-
-  const hoursPct = prevMinutes > 0
-    ? ((totalTeamMinutes - prevMinutes) / prevMinutes * 100).toFixed(1)
-    : 'N/A';
-  const salesPct = prevSales > 0
-    ? ((totalNetSales - prevSales) / prevSales * 100).toFixed(1)
-    : 'N/A';
-
-  const hoursTrend = typeof hoursPct === 'string' ? '' : (Number(hoursPct) >= 0 ? '▲' : '▼');
-  const salesTrend = typeof salesPct === 'string' ? '' : (Number(salesPct) >= 0 ? '▲' : '▼');
-
-  // Anomalies
-  const allShifts = db.getAllEmployeesWithShifts(start, end).flatMap(emp =>
-    db.getWeekShifts(emp.discord_id, start, end)
-  );
-  const autoClosed = allShifts.filter(s => s.auto_closed).length;
-  const shortShifts = allShifts.filter(s => (s.duration_minutes ?? 0) < 30 && !s.auto_closed).length;
-
-  const allEmps = db.getAllEmployees();
-  const activeIds = new Set(employees.map(e => e.discord_id));
-  const zeroShiftEmps = allEmps.filter(e => !activeIds.has(e.discord_id));
-  const zeroShiftNames = zeroShiftEmps.map(e => e.username).join(', ') || 'None';
-
-  let anomalies = [];
-  if (autoClosed > 0) anomalies.push(`⚠️ ${autoClosed} auto-closed shift(s)`);
-  if (shortShifts > 0) anomalies.push(`⏱️ ${shortShifts} shift(s) under 30 minutes`);
-  if (zeroShiftEmps.length > 0) anomalies.push(`😴 Employees with 0 shifts: ${zeroShiftNames}`);
-
-  const summaryEmbed = new EmbedBuilder()
-    .setColor(0xe67e22)
-    .setTitle('📋 Payroll & Agency Summary')
+  // ── Build single summary embed ────────────────────────────────────────────
+  const embed = new EmbedBuilder()
+    .setColor(0x2ecc71)
+    .setTitle(`📊 Weekly Report — ${label}`)
     .addFields(
-      {
-        name: '💬 Chatter Payroll',
-        value: `Hourly: $${totalChatterHourly.toFixed(2)} + Commission: $${totalChatterCommission.toFixed(2)} = **$${totalChatterPay.toFixed(2)}**`,
-      },
-      {
-        name: '📣 Marketing Payroll',
-        value: `$${totalMarketingPay.toFixed(2)}`,
-      },
-      {
-        name: '💵 Total Payroll',
-        value: `**$${totalPay.toFixed(2)}**`,
-      },
-      {
-        name: '🕐 Total Team Hours',
-        value: `${formatDuration(totalTeamMinutes)} ${hoursTrend}${hoursPct !== 'N/A' ? ` (${hoursPct}% vs prev week)` : ''}`,
-        inline: true,
-      },
-      {
-        name: '💰 Total Net Sales',
-        value: `$${totalNetSales.toFixed(2)} ${salesTrend}${salesPct !== 'N/A' ? ` (${salesPct}% vs prev week)` : ''}`,
-        inline: true,
-      },
-      {
-        name: '⚠️ Anomalies',
-        value: anomalies.length > 0 ? anomalies.join('\n') : '✅ None',
-      },
-    );
+      { name: '🕐 Total Hours', value: formatDuration(totalMinutes), inline: true },
+      { name: '💰 Total Sales', value: `$${totalSales.toFixed(2)}`, inline: true },
+    )
+    .setTimestamp();
 
-  embeds.push(summaryEmbed);
-
-  // Discord limits 10 embeds per message; split if needed
-  for (let i = 0; i < embeds.length; i += 10) {
-    await reportChannel.send({ embeds: embeds.slice(i, i + 10) });
+  // Add employee breakdown in chunks safe for Discord (≤1024 chars per field)
+  const CHUNK = 1024;
+  let chunk = '';
+  let first = true;
+  for (const row of rows) {
+    const line = chunk ? '\n' + row : row;
+    if ((chunk + line).length > CHUNK) {
+      embed.addFields({ name: first ? '👥 Breakdown' : '​', value: chunk });
+      first = false;
+      chunk = row;
+    } else {
+      chunk += line;
+    }
   }
+  if (chunk) embed.addFields({ name: first ? '👥 Breakdown' : '​', value: chunk });
+
+  await reportChannel.send({ embeds: [embed] });
 }
 
 module.exports = { sendWeeklyReport };

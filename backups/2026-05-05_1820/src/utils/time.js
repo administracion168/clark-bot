@@ -1,22 +1,5 @@
-// All times stored as UTC ISO strings in DB; displayed in America/New_York (EST/EDT).
+// All times stored as UTC ISO strings in DB; displayed as EST (UTC-5).
 
-/**
- * Returns the current UTC offset for America/New_York in milliseconds.
- * Automatically handles EST (UTC-5) in winter and EDT (UTC-4) in summer.
- */
-function getNYOffsetMs(date = new Date()) {
-  try {
-    const str = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      timeZoneName: 'shortOffset',
-    }).format(date);
-    const match = str.match(/GMT([+-]\d+)/);
-    if (match) return parseInt(match[1], 10) * 3600000;
-  } catch (_) {}
-  return -5 * 3600000; // fallback to EST
-}
-
-// Legacy constant — keep for compatibility but always compute dynamically below
 const EST_OFFSET_MS = -5 * 60 * 60 * 1000;
 
 /**
@@ -24,7 +7,7 @@ const EST_OFFSET_MS = -5 * 60 * 60 * 1000;
  */
 function toEST(dateOrISO) {
   const d = typeof dateOrISO === 'string' ? new Date(dateOrISO) : dateOrISO;
-  const est = new Date(d.getTime() + getNYOffsetMs(d));
+  const est = new Date(d.getTime() + EST_OFFSET_MS);
   const hh = String(est.getUTCHours()).padStart(2, '0');
   const mm = String(est.getUTCMinutes()).padStart(2, '0');
   return `${hh}:${mm} EST`;
@@ -35,7 +18,7 @@ function toEST(dateOrISO) {
  */
 function toESTFull(dateOrISO) {
   const d = typeof dateOrISO === 'string' ? new Date(dateOrISO) : dateOrISO;
-  const est = new Date(d.getTime() + getNYOffsetMs(d));
+  const est = new Date(d.getTime() + EST_OFFSET_MS);
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -52,7 +35,7 @@ function toESTFull(dateOrISO) {
  */
 function toESTDate(dateOrISO) {
   const d = typeof dateOrISO === 'string' ? new Date(dateOrISO) : dateOrISO;
-  const est = new Date(d.getTime() + getNYOffsetMs(d));
+  const est = new Date(d.getTime() + EST_OFFSET_MS);
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${months[est.getUTCMonth()]} ${String(est.getUTCDate()).padStart(2, '0')}`;
@@ -75,9 +58,8 @@ function formatDuration(minutes) {
  */
 function getPreviousWeekBounds() {
   const now = new Date();
-  const offsetMs = getNYOffsetMs(now);
-  // Current day in NY time
-  const estNow = new Date(now.getTime() + offsetMs);
+  // Current day in EST
+  const estNow = new Date(now.getTime() + EST_OFFSET_MS);
 
   // Day of week: 0=Sun, 1=Mon … 6=Sat
   const dow = estNow.getUTCDay();
@@ -96,8 +78,8 @@ function getPreviousWeekBounds() {
   prevSundayEST.setUTCHours(23, 59, 59, 999);
 
   // Convert back to UTC for DB queries
-  const startUTC = new Date(prevMondayEST.getTime() - offsetMs);
-  const endUTC = new Date(prevSundayEST.getTime() - offsetMs);
+  const startUTC = new Date(prevMondayEST.getTime() - EST_OFFSET_MS);
+  const endUTC = new Date(prevSundayEST.getTime() - EST_OFFSET_MS);
 
   return {
     start: startUTC.toISOString(),
@@ -111,8 +93,7 @@ function getPreviousWeekBounds() {
  */
 function getCurrentWeekBounds() {
   const now = new Date();
-  const offsetMs = getNYOffsetMs(now);
-  const estNow = new Date(now.getTime() + offsetMs);
+  const estNow = new Date(now.getTime() + EST_OFFSET_MS);
   const dow = estNow.getUTCDay();
   const daysToMonday = (dow === 0 ? 6 : dow - 1);
   const mondayEST = new Date(estNow);
@@ -123,8 +104,8 @@ function getCurrentWeekBounds() {
   sundayEST.setUTCDate(mondayEST.getUTCDate() + 6);
   sundayEST.setUTCHours(23, 59, 59, 999);
 
-  const startUTC = new Date(mondayEST.getTime() - offsetMs);
-  const endUTC = new Date(sundayEST.getTime() - offsetMs);
+  const startUTC = new Date(mondayEST.getTime() - EST_OFFSET_MS);
+  const endUTC = new Date(sundayEST.getTime() - EST_OFFSET_MS);
 
   return {
     start: startUTC.toISOString(),

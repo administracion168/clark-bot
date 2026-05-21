@@ -7,13 +7,6 @@ const db = require('../database');
  */
 function resolveClarkRole(member) {
   const departments = db.getAllDepartments();
-
-  // Primary: match by Discord role ID (exact, never breaks on name changes)
-  const memberRoleIds = new Set(member.roles.cache.map(r => r.id));
-  const deptByRoleId = departments.find(d => d.role_id && memberRoleIds.has(d.role_id));
-  if (deptByRoleId) return deptByRoleId.name;
-
-  // Fallback: match by role name (covers 'chatter' dept which has no role_id)
   const deptNames = new Set(departments.map(d => d.name.toLowerCase()));
   const memberRoleName = member.roles.cache
     .map(r => r.name.toLowerCase())

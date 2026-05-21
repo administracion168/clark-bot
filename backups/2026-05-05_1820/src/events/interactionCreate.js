@@ -1,8 +1,6 @@
 const clockoutCmd = require('../commands/clockout');
 const setRoleCmd = require('../commands/setrole');
 const { handleTicketInteraction } = require('../handlers/ticketHandler');
-const { handleContentIdeasInteraction, handleIdeasModalSubmit } = require('../handlers/contentIdeasHandler');
-const { handleGetNumberInteraction } = require('../handlers/getnumberHandler');
 
 module.exports = {
   name: 'interactionCreate',
@@ -16,58 +14,13 @@ module.exports = {
       customId.startsWith('req_modal_') ||
       customId.startsWith('req_reply_') ||
       customId.startsWith('req_replymsg_') ||
-      customId.startsWith('req_received_') ||
-      customId.startsWith('req_cancel_') ||
-      customId.startsWith('req_cancelreason_')
+      customId.startsWith('req_received_')
     ) {
       try {
         await handleTicketInteraction(interaction);
       } catch (err) {
         console.error('[Ticket] Interaction error:', err);
         const msg = { content: '❌ Something went wrong with this request.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(msg).catch(() => {});
-        } else {
-          await interaction.reply(msg).catch(() => {});
-        }
-      }
-      return;
-    }
-
-    // ── GetNumber buttons (ig_get_number_btn / num_svc1 / num_svc2 / num_use_ / num_cancel_) ──────
-    if (
-      customId === 'ig_get_number_btn' ||
-      customId === 'num_svc1' ||
-      customId === 'num_svc2' ||
-      customId.startsWith('num_use_') ||
-      customId.startsWith('num_cancel_')
-    ) {
-      try {
-        await handleGetNumberInteraction(interaction);
-      } catch (err) {
-        console.error('[GetNumber] Interaction error:', err);
-        const msg = { content: '❌ Something went wrong.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp(msg).catch(() => {});
-        } else {
-          await interaction.reply(msg).catch(() => {});
-        }
-      }
-      return;
-    }
-
-    // ── Content Ideas buttons/selects ──────────────────────────────────────
-    if (
-      customId === 'ideas_reddit_btn' ||
-      customId === 'ideas_reels_btn' ||
-      customId === 'ideas_select_reddit' ||
-      customId === 'ideas_select_reels'
-    ) {
-      try {
-        await handleContentIdeasInteraction(interaction);
-      } catch (err) {
-        console.error('[Ideas] Interaction error:', err);
-        const msg = { content: '❌ Something went wrong.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(msg).catch(() => {});
         } else {
@@ -119,14 +72,6 @@ module.exports = {
 
         if (interaction.customId.startsWith('setrole_salary_')) {
           await setRoleCmd.handleModal(interaction, client);
-          return;
-        }
-
-        if (
-          interaction.customId.startsWith('ideas_modal_reddit_') ||
-          interaction.customId.startsWith('ideas_modal_reels_')
-        ) {
-          await handleIdeasModalSubmit(interaction);
           return;
         }
       } catch (err) {

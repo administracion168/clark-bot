@@ -3,7 +3,6 @@ const db = require('../database');
 const { sendWeeklyReport } = require('./report');
 const { getLogChannelId } = require('./roles');
 const { EmbedBuilder } = require('discord.js');
-const { buildEmbed: buildActiveWorkersEmbed } = require('../commands/setupactiveworkers');
 
 /**
  * Start all scheduled jobs.
@@ -66,36 +65,7 @@ function startScheduler(client) {
     }
   }, { timezone: 'UTC' });
 
-  // ── Active workers live update: every minute ──────────────────────────────
-  async function updateActiveWorkers() {
-    try {
-      const channelId = db.getConfig('active_workers_channel_id');
-      const messageId = db.getConfig('active_workers_message_id');
-      if (!channelId || !messageId) return;
-
-      const channel = await client.channels.fetch(channelId).catch(() => null);
-      if (!channel) return;
-
-      const message = await channel.messages.fetch(messageId).catch(() => null);
-      if (!message) return;
-
-      const openShifts = db.getAllOpenShifts();
-      const shifts = openShifts.map(shift => ({
-        shift,
-        employee: db.getEmployee(shift.discord_id),
-      }));
-
-      await message.edit({ embeds: [buildActiveWorkersEmbed(shifts)] });
-    } catch (err) {
-      console.error('[ActiveWorkers] Update error:', err.message);
-    }
-  }
-
-  // Run immediately on startup, then every 60 seconds
-  updateActiveWorkers();
-  setInterval(updateActiveWorkers, 60_000);
-
-  console.log('[Scheduler] Jobs started: auto-close (hourly), weekly report (Mon 09:00 EST), active workers (every 1 min).');
+  console.log('[Scheduler] Jobs started: auto-close (hourly), weekly report (Mon 09:00 EST).');
 }
 
 module.exports = { startScheduler };
