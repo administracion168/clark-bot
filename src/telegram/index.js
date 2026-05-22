@@ -228,7 +228,7 @@ function buildHomeDashboard(model) {
   const reels    = pending.filter(i => i.type === 'reels').length;
   const reddit   = pending.filter(i => i.type === 'reddit').length;
   const tickets  = ['pending', 'accepted', 'delivered']
-    .flatMap(s => db.getAllTickets(s, model.id));
+    .flatMap(s => db.getAllTickets({ status: s, modelId: model.id }));
 
   const lines = [];
   if (tickets.length)   lines.push(isEs ? `📋 <b>${tickets.length}</b> custom(s) activo(s)` : `📋 <b>${tickets.length}</b> active custom(s)`);
@@ -241,12 +241,14 @@ function buildHomeDashboard(model) {
   return { html: greeting + '\n\n' + lines.join('\n') + hint, rows: null };
 }
 
-function buildCustomsDashboard(model) {
+// ── Customs: list view (one button per ticket) ────────────────────────────────
+
+function buildCustomsList(model) {
   const lang = model.language || 'en';
   const isEs = lang === 'es';
 
   const tickets = ['pending', 'accepted', 'delivered']
-    .flatMap(s => db.getAllTickets(s, model.id));
+    .flatMap(s => db.getAllTickets({ status: s, modelId: model.id }));
 
   if (!tickets.length) {
     return {
@@ -257,36 +259,70 @@ function buildCustomsDashboard(model) {
     };
   }
 
-  const statusIcon  = { pending: '⏳', accepted: '✅', delivered: '📦' };
-  const statusLabelEs = { pending: 'Pendiente',  accepted: 'Aceptado', delivered: 'Entregado — esperando confirmación' };
-  const statusLabelEn = { pending: 'Pending',    accepted: 'Accepted', delivered: 'Delivered — awaiting confirmation' };
+  const statusIcon = { pending: '⏳', accepted: '✅', delivered: '📦' };
 
-  const lines = tickets.map(tk => {
+  const title = isEs
+    ? `📋 <b>Mis Customs</b> (${tickets.length})\n\nToca una solicitud para ver los detalles:`
+    : `📋 <b>My Customs</b> (${tickets.length})\n\nTap a request to see details:`;
+
+  // One button per ticket — shows status icon + number + type
+  const rows = tickets.map(tk => {
     const icon  = statusIcon[tk.status] ?? '📋';
-    const label = isEs ? (statusLabelEs[tk.status] ?? tk.status) : (statusLabelEn[tk.status] ?? tk.status);
-    return `${icon} <b>#${tk.ticket_number}</b> — ${typeLabel(tk.type, lang)}\n     ${label}`;
+    const label = `${icon} #${tk.ticket_number} — ${typeLabel(tk.type, lang)}`;
+    return [{ text: label, callback_data: `custom_open_${tk.id}` }];
   });
 
-  const title = isEs ? `📋 <b>Mis Customs</b> (${tickets.length})` : `📋 <b>My Customs</b> (${tickets.length})`;
-  const html  = title + '\n\n' + lines.join('\n\n');
+  return { html: title, rows };
+}
 
-  const rows = tickets.flatMap(tk => {
-    if (tk.status === 'accepted') {
-      return [[
-        { text: isEs ? '💬 Responder' : '💬 Reply',    callback_data: `tg_reply_${tk.id}` },
-        { text: isEs ? '📦 Entregar'  : '📦 Delivered', callback_data: `tg_done_${tk.id}` },
-      ]];
-    }
-    if (tk.status === 'pending') {
-      return [[
-        { text: isEs ? '✅ Aceptar'  : '✅ Accept', callback_data: `tg_accept_${tk.id}` },
-        { text: isEs ? '❌ Rechazar' : '❌ Deny',   callback_data: `tg_deny_${tk.id}`   },
-      ]];
-    }
-    return [];
-  });
+// ── Customs: ticket detail view ───────────────────────────────────────────────
 
-  return { html, rows: rows.length ? rows : null };
+function buildTicketDetail(model, ticket) {
+  const lang = model.language || 'en';
+  const isEs = lang === 'es';
+
+  const statusIcon    = { pending: '⏳', accepted: '✅', delivered: '📦' };
+  const statusLabelEs = { pending: 'Pendiente', accepted: 'Aceptado', delivered: 'Entregado — esperando confirmación' };
+  const statusLabelEn = { pending: 'Pending',   accepted: 'Accepted', delivered: 'Delivered — awaiting confirmation' };
+
+  const icon       = statusIcon[ticket.status] ?? '📋';
+  const statusTxt  = isEs ? (statusLabelEs[ticket.status] ?? ticket.status) : (statusLabelEn[ticket.status] ?? ticket.status);
+  const priceStr   = ticket.price ? `$${ticket.price}` : (isEs ? 'No especificado' : 'Not specified');
+  const estStr     = ticket.client_estimated_time ?? (isEs ? 'No especificado' : 'Not specified');
+  const desc       = ticket.description ?? '';
+
+  const html =
+    `${icon} <b>#${ticket.ticket_number} — ${typeLabel(ticket.type, lang)}</b>\n\n` +
+    `📌 <b>${isEs ? 'Estado' : 'Status'}:</b> ${statusTxt}\n` +
+    `💰 <b>${isEs ? 'Precio' : 'Price'}:</b> ${priceStr}\n` +
+    `⏱ <b>${isEs ? 'Estimado cliente' : 'Client estimate'}:</b> ${estStr}\n\n` +
+    `📝 <b>${isEs ? 'Descripción' : 'Description'}:</b>\n${desc}`;
+
+  const backBtn = [{ text: isEs ? '← Volver a lista' : '← Back to list', callback_data: 'custom_list' }];
+
+  let actionRows = [];
+  if (ticket.status === 'pending') {
+    actionRows = [[
+      { text: isEs ? '✅ Aceptar'  : '✅ Accept', callback_data: `tg_accept_${ticket.id}` },
+      { text: isEs ? '❌ Rechazar' : '❌ Deny',   callback_data: `tg_deny_${ticket.id}`   },
+    ]];
+  } else if (ticket.status === 'accepted') {
+    actionRows = [
+      [
+        { text: isEs ? '💬 Responder'    : '💬 Reply',       callback_data: `tg_reply_${ticket.id}` },
+        { text: isEs ? '📦 Marcar entregado' : '📦 Mark delivered', callback_data: `tg_done_${ticket.id}`  },
+      ],
+    ];
+  } else if (ticket.status === 'delivered') {
+    actionRows = [[{ text: isEs ? '⏳ Esperando confirmación del chatter' : '⏳ Waiting for chatter confirmation', callback_data: 'noop' }]];
+  }
+
+  return { html, rows: [...actionRows, backBtn] };
+}
+
+// Legacy alias — kept for internal refreshes that still call buildCustomsDashboard
+function buildCustomsDashboard(model) {
+  return buildCustomsList(model);
 }
 
 function buildIdeasDashboard(model, type) {
@@ -701,6 +737,26 @@ function startTelegramBot(client) {
       return;
     }
 
+    // ── No-op (informational button) ───────────────────────────────────
+    if (data === 'noop') return;
+
+    // ── Customs: back to list ───────────────────────────────────────────
+    if (data === 'custom_list') {
+      if (!model) return;
+      const dash = buildCustomsList(model);
+      return updateDashboard(chatId, lang, dash.html, dash.rows);
+    }
+
+    // ── Customs: open ticket detail ─────────────────────────────────────
+    if (data.startsWith('custom_open_')) {
+      if (!model) return;
+      const ticketId = parseInt(data.replace('custom_open_', ''), 10);
+      const ticket   = db.getTicket(ticketId);
+      if (!ticket || ticket.model_id !== model.id) return; // safety check
+      const detail = buildTicketDetail(model, ticket);
+      return updateDashboard(chatId, lang, detail.html, detail.rows);
+    }
+
     // ── Ticket inline buttons (tg_action_ticketId) ──────────────────────
     const parts    = data.split('_');
     const action   = parts[1];
@@ -722,7 +778,7 @@ function startTelegramBot(client) {
     } else if (action === 'done') {
       await handleDone(chatId, ticketId);
       if (model) {
-        const dash = buildCustomsDashboard(model);
+        const dash = buildCustomsList(model);
         await updateDashboard(chatId, lang, dash.html, dash.rows);
       }
     } else if (action === 'cancel') {
@@ -765,9 +821,9 @@ function startTelegramBot(client) {
         await handleCancelByModel(chatId, ticketId, text);
       }
 
-      // Refresh customs dashboard after any ticket action
+      // Refresh customs list after any ticket action
       if (model) {
-        const dash = buildCustomsDashboard(model);
+        const dash = buildCustomsList(model);
         await updateDashboard(chatId, lang, dash.html, dash.rows);
       }
       return;
@@ -778,7 +834,7 @@ function startTelegramBot(client) {
       const m = MENU[lang] ?? MENU.en;
 
       if (text === m.customs) {
-        const dash = buildCustomsDashboard(model);
+        const dash = buildCustomsList(model);
         return updateDashboard(chatId, lang, dash.html, dash.rows);
       }
       if (text === m.reels) {
