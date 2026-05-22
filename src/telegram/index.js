@@ -5,24 +5,43 @@ const { translate } = require('../utils/translate');
 const { markIdeaCompleted } = require('../utils/airtable');
 const { generatePendingIdeasPdf } = require('../utils/pdfGenerator');
 
-let bot = null;
+let bot          = null;
 let discordClient = null;
 
 // In-memory state
 const pendingActions = new Map(); // chatId → { action, ticketId }
-const pendingLink    = new Map(); // chatId → pendingCode  (language not yet chosen)
+const pendingLink    = new Map(); // chatId → rawCode | '__lang_xx'
+const lastDashboard  = new Map(); // chatId → messageId  (the card we edit in-place)
+
+// ── Menu labels (persistent keyboard) ────────────────────────────────────────
+
+const MENU = {
+  en: { customs: '📋 My Customs', reels: '🎬 Reels Ideas', reddit: '💡 Reddit Ideas', lang: '🌐 Language' },
+  es: { customs: '📋 Mis Customs', reels: '🎬 Ideas Reels', reddit: '💡 Ideas Reddit', lang: '🌐 Idioma'   },
+};
+
+function mainMenuKeyboard(lang) {
+  const m = MENU[lang] ?? MENU.en;
+  return {
+    keyboard: [
+      [{ text: m.customs }, { text: m.reels   }],
+      [{ text: m.reddit  }, { text: m.lang    }],
+    ],
+    resize_keyboard : true,
+    is_persistent   : true,
+  };
+}
 
 // ── Translations ──────────────────────────────────────────────────────────────
 
 const T = {
   en: {
     chooseLanguage : '🌐 Choose your language / Elige tu idioma:',
-    sendCode       : '✅ Language set to English!\n\nNow send your linking code:\n`/start CLARK-XXXXXX`',
+    sendCode       : '✅ Language set to English!\n\nNow send your linking code:\n<code>/start CLARK-XXXXXX</code>',
     invalidCode    : '❌ Invalid code. Ask your admin for a new one.',
-    alreadyLinked  : '✅ This account is already linked!',
-    linked         : (name) => `✅ Linked as *${name}*\\! You'll receive custom requests here\\.`,
-    noCode         : 'Hi\\! Send your linking code to connect your account\\.\nExample: `/start CLARK\\-1234`',
-    newRequest     : (n) => `📋 *NEW REQUEST \\#${n}*`,
+    alreadyLinked  : '✅ Already linked! Use the menu below.',
+    linked         : (name) => `✅ Linked as <b>${name}</b>! You'll receive custom requests here.`,
+    newRequest     : (n) => `📋 <b>NEW REQUEST #${n}</b>`,
     chatterLabel   : 'Support',
     priorityUrgent : '🔴 URGENT',
     priorityNormal : '🟢 Normal',
@@ -30,36 +49,35 @@ const T = {
     fieldPriority  : 'Priority',
     fieldPrice     : 'Price',
     fieldEstimate  : 'Client estimate',
-    fieldDetails   : '📝 *Details:*',
+    fieldDetails   : '<b>Details:</b>',
     notSpecified   : 'Not specified',
     btnAccept      : '✅ Accept',
     btnDeny        : '❌ Deny',
-    btnQuestion    : '💬 Ask a question',
+    btnQuestion    : '💬 Ask question',
     btnReply       : '💬 Reply',
-    btnDone        : '📦 Mark as Delivered',
-    btnCancel      : '🚫 Cancel Request',
-    askDays        : '✅ How many days do you estimate for delivery? (send a number)',
-    askDenyReason  : '❌ What is the reason for denying this request?',
+    btnDone        : '📦 Mark Delivered',
+    btnCancel      : '🚫 Cancel',
+    askDays        : '✅ How many days do you estimate for delivery? (reply with a number)',
+    askDenyReason  : '❌ What is the reason for denying this?',
     askQuestion    : '💬 What is your question for the chatter?',
     askReply       : '💬 Type your message:',
-    askCancelReason: '🚫 Why are you cancelling this request?',
-    invalidDays    : '❌ Please send a valid number. Try again.',
-    accepted       : (days) => `✅ Accepted! Estimated delivery: ${days} day(s).\n\nUse the buttons below to reply or mark as delivered.`,
-    denied         : '❌ Request denied. The chatter has been notified.',
-    questionSent   : '✅ Question sent to the chatter.',
+    askCancelReason: '🚫 Why are you cancelling?',
+    invalidDays    : '❌ Please send a valid number (e.g. 2). Try again:',
+    accepted       : (days) => `✅ Accepted! Estimated delivery: ${days} day(s).`,
+    denied         : '❌ Request denied. Chatter has been notified.',
+    questionSent   : '✅ Question sent.',
     messageSent    : '✅ Message sent.',
     delivered      : '✅ Marked as delivered! Waiting for chatter confirmation.',
     cancelled      : '🚫 Request cancelled.',
-    supportLabel   : '💬 *Support:*',
+    supportLabel   : '💬 <b>Support:</b>',
   },
   es: {
     chooseLanguage : '🌐 Choose your language / Elige tu idioma:',
-    sendCode       : '✅ ¡Idioma configurado en Español!\n\nAhora envía tu código de vinculación:\n`/start CLARK-XXXXXX`',
+    sendCode       : '✅ ¡Idioma configurado en Español!\n\nAhora envía tu código de vinculación:\n<code>/start CLARK-XXXXXX</code>',
     invalidCode    : '❌ Código inválido. Pide un nuevo código a tu administrador.',
-    alreadyLinked  : '✅ ¡Esta cuenta ya está vinculada!',
-    linked         : (name) => `✅ Vinculada como *${name}*\\! Recibirás solicitudes de contenido aquí\\.`,
-    noCode         : '¡Hola\\! Envía tu código de vinculación para conectar tu cuenta\\.\nEjemplo: `/start CLARK\\-1234`',
-    newRequest     : (n) => `📋 *NUEVA SOLICITUD \\#${n}*`,
+    alreadyLinked  : '✅ ¡Ya estás vinculada! Usa el menú de abajo.',
+    linked         : (name) => `✅ Vinculada como <b>${name}</b>. ¡Recibirás tus solicitudes aquí!`,
+    newRequest     : (n) => `📋 <b>NUEVA SOLICITUD #${n}</b>`,
     chatterLabel   : 'Soporte',
     priorityUrgent : '🔴 URGENTE',
     priorityNormal : '🟢 Normal',
@@ -67,27 +85,27 @@ const T = {
     fieldPriority  : 'Prioridad',
     fieldPrice     : 'Precio',
     fieldEstimate  : 'Estimado del cliente',
-    fieldDetails   : '📝 *Detalles:*',
+    fieldDetails   : '<b>Detalles:</b>',
     notSpecified   : 'No especificado',
     btnAccept      : '✅ Aceptar',
     btnDeny        : '❌ Rechazar',
-    btnQuestion    : '💬 Hacer una pregunta',
+    btnQuestion    : '💬 Preguntar',
     btnReply       : '💬 Responder',
-    btnDone        : '📦 Marcar como entregado',
-    btnCancel      : '🚫 Cancelar solicitud',
-    askDays        : '✅ ¿En cuántos días estimas la entrega? (envía un número)',
+    btnDone        : '📦 Entregar',
+    btnCancel      : '🚫 Cancelar',
+    askDays        : '✅ ¿En cuántos días estimas la entrega? (responde con un número)',
     askDenyReason  : '❌ ¿Cuál es el motivo del rechazo?',
     askQuestion    : '💬 ¿Cuál es tu pregunta para el equipo de soporte?',
     askReply       : '💬 Escribe tu mensaje:',
     askCancelReason: '🚫 ¿Motivo de la cancelación?',
-    invalidDays    : '❌ Por favor envía un número válido. Inténtalo de nuevo.',
-    accepted       : (days) => `✅ ¡Aceptado! Entrega estimada: ${days} día(s).\n\nUsa los botones para responder o marcar como entregado.`,
+    invalidDays    : '❌ Por favor envía un número válido (ej: 2). Inténtalo de nuevo:',
+    accepted       : (days) => `✅ ¡Aceptado! Entrega estimada: ${days} día(s).`,
     denied         : '❌ Solicitud rechazada. El equipo de soporte ha sido notificado.',
-    questionSent   : '✅ Pregunta enviada al equipo de soporte.',
+    questionSent   : '✅ Pregunta enviada.',
     messageSent    : '✅ Mensaje enviado.',
     delivered      : '✅ ¡Marcado como entregado! Esperando confirmación.',
     cancelled      : '🚫 Solicitud cancelada.',
-    supportLabel   : '💬 *Soporte:*',
+    supportLabel   : '💬 <b>Soporte:</b>',
   },
 };
 
@@ -97,7 +115,24 @@ function t(lang, key, ...args) {
   return typeof val === 'function' ? val(...args) : val;
 }
 
-// ── Keyboards ─────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function typeLabel(type, lang) {
+  const en = { video: '🎬 Custom Video', photo: '📸 Custom Photo', audio: '🎙️ Custom Audio', question: '❓ Question', other: '📋 Other' };
+  const es = { video: '🎬 Video personalizado', photo: '📸 Foto personalizada', audio: '🎙️ Audio personalizado', question: '❓ Pregunta', other: '📋 Otro' };
+  return (lang === 'es' ? es : en)[type] ?? type;
+}
+
+function escapeMd(text) {
+  if (!text) return '';
+  return String(text).replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+}
+
+function modelLang(ticketId) {
+  const ticket = db.getTicket(ticketId);
+  const model  = ticket ? db.getModel(ticket.model_id) : null;
+  return model?.language || 'en';
+}
 
 function languageKeyboard() {
   return {
@@ -131,19 +166,177 @@ function replyKeyboard(ticketId, lang) {
   };
 }
 
-function typeLabel(type, lang) {
-  const en = { video: '🎬 Custom Video', photo: '📸 Custom Photo', audio: '🎙️ Custom Audio', question: '❓ Question', other: '📋 Other' };
-  const es = { video: '🎬 Video personalizado', photo: '📸 Foto personalizada', audio: '🎙️ Audio personalizado', question: '❓ Pregunta', other: '📋 Otro' };
-  return (lang === 'es' ? es : en)[type] ?? type;
+// ── Dashboard engine ──────────────────────────────────────────────────────────
+// One persistent "card" per chat that gets edited in-place — no message pile-up.
+
+async function updateDashboard(chatId, lang, html, inlineRows = null) {
+  if (!bot) return;
+  const prevId    = lastDashboard.get(chatId);
+  const inlineKb  = inlineRows ? { inline_keyboard: inlineRows } : undefined;
+
+  if (prevId) {
+    try {
+      await bot.editMessageText(html, {
+        chat_id    : chatId,
+        message_id : prevId,
+        parse_mode : 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: inlineKb,
+      });
+      return; // edited in-place, no new message needed
+    } catch (_) {
+      // Message too old / deleted — fall through to send fresh
+    }
+  }
+
+  // Send fresh + set persistent keyboard
+  const msg = await bot.sendMessage(chatId, html, {
+    parse_mode  : 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: inlineKb ?? mainMenuKeyboard(lang),
+  });
+
+  // Clean up the stale card
+  if (prevId) bot.deleteMessage(chatId, prevId).catch(() => {});
+  lastDashboard.set(chatId, msg.message_id);
 }
 
-// Escape all special MarkdownV2 characters in user-provided text
-function escapeMd(text) {
-  if (!text) return '';
-  return String(text).replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
+// Refresh the keyboard (language change) — must send a new message.
+async function refreshMenuKeyboard(chatId, lang, html, inlineRows = null) {
+  if (!bot) return;
+  const prevId   = lastDashboard.get(chatId);
+  const inlineKb = inlineRows ? { inline_keyboard: inlineRows } : undefined;
+
+  const msg = await bot.sendMessage(chatId, html, {
+    parse_mode  : 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: inlineKb ?? mainMenuKeyboard(lang),
+  });
+
+  if (prevId) bot.deleteMessage(chatId, prevId).catch(() => {});
+  lastDashboard.set(chatId, msg.message_id);
 }
 
-// ── Send request to model ─────────────────────────────────────────────────────
+// ── Dashboard builders ────────────────────────────────────────────────────────
+
+function buildHomeDashboard(model) {
+  const lang  = model.language || 'en';
+  const isEs  = lang === 'es';
+  const name  = model.name;
+
+  const pending  = db.getModelPendingIdeas(model.id);
+  const reels    = pending.filter(i => i.type === 'reels').length;
+  const reddit   = pending.filter(i => i.type === 'reddit').length;
+  const tickets  = ['pending', 'accepted', 'delivered']
+    .flatMap(s => db.getAllTickets(s, model.id));
+
+  const lines = [];
+  if (tickets.length)   lines.push(isEs ? `📋 <b>${tickets.length}</b> custom(s) activo(s)` : `📋 <b>${tickets.length}</b> active custom(s)`);
+  if (reels   > 0)      lines.push(isEs ? `🎬 <b>${reels}</b> idea(s) Reels pendiente(s)` : `🎬 <b>${reels}</b> pending Reels idea(s)`);
+  if (reddit  > 0)      lines.push(isEs ? `💡 <b>${reddit}</b> idea(s) Reddit pendiente(s)` : `💡 <b>${reddit}</b> pending Reddit idea(s)`);
+  if (!lines.length)    lines.push(isEs ? '✅ ¡Todo al día!' : '✅ All up to date!');
+
+  const greeting = isEs ? `👋 Hola, <b>${name}</b>` : `👋 Hi, <b>${name}</b>`;
+  const hint = isEs ? '\n\n<i>Usa los botones del menú para navegar.</i>' : '\n\n<i>Use the menu buttons to navigate.</i>';
+  return { html: greeting + '\n\n' + lines.join('\n') + hint, rows: null };
+}
+
+function buildCustomsDashboard(model) {
+  const lang = model.language || 'en';
+  const isEs = lang === 'es';
+
+  const tickets = ['pending', 'accepted', 'delivered']
+    .flatMap(s => db.getAllTickets(s, model.id));
+
+  if (!tickets.length) {
+    return {
+      html: isEs
+        ? '📋 <b>Mis Customs</b>\n\n✅ ¡No tienes customs pendientes!\nTodo al día 🎉'
+        : '📋 <b>My Customs</b>\n\n✅ No pending customs!\nAll up to date 🎉',
+      rows: null,
+    };
+  }
+
+  const statusIcon  = { pending: '⏳', accepted: '✅', delivered: '📦' };
+  const statusLabelEs = { pending: 'Pendiente',  accepted: 'Aceptado', delivered: 'Entregado — esperando confirmación' };
+  const statusLabelEn = { pending: 'Pending',    accepted: 'Accepted', delivered: 'Delivered — awaiting confirmation' };
+
+  const lines = tickets.map(tk => {
+    const icon  = statusIcon[tk.status] ?? '📋';
+    const label = isEs ? (statusLabelEs[tk.status] ?? tk.status) : (statusLabelEn[tk.status] ?? tk.status);
+    return `${icon} <b>#${tk.ticket_number}</b> — ${typeLabel(tk.type, lang)}\n     ${label}`;
+  });
+
+  const title = isEs ? `📋 <b>Mis Customs</b> (${tickets.length})` : `📋 <b>My Customs</b> (${tickets.length})`;
+  const html  = title + '\n\n' + lines.join('\n\n');
+
+  const rows = tickets.flatMap(tk => {
+    if (tk.status === 'accepted') {
+      return [[
+        { text: isEs ? '💬 Responder' : '💬 Reply',    callback_data: `tg_reply_${tk.id}` },
+        { text: isEs ? '📦 Entregar'  : '📦 Delivered', callback_data: `tg_done_${tk.id}` },
+      ]];
+    }
+    if (tk.status === 'pending') {
+      return [[
+        { text: isEs ? '✅ Aceptar'  : '✅ Accept', callback_data: `tg_accept_${tk.id}` },
+        { text: isEs ? '❌ Rechazar' : '❌ Deny',   callback_data: `tg_deny_${tk.id}`   },
+      ]];
+    }
+    return [];
+  });
+
+  return { html, rows: rows.length ? rows : null };
+}
+
+function buildIdeasDashboard(model, type) {
+  const lang   = model.language || 'en';
+  const isEs   = lang === 'es';
+  const ideas  = db.getModelPendingIdeas(model.id).filter(i => i.type === type);
+
+  const info = {
+    reels:  { emoji: '🎬', es: 'Ideas Reels',   en: 'Reels Ideas'  },
+    reddit: { emoji: '💡', es: 'Ideas Reddit',  en: 'Reddit Ideas' },
+  }[type] ?? { emoji: '📋', es: type, en: type };
+
+  const label = isEs ? info.es : info.en;
+
+  if (!ideas.length) {
+    return {
+      html: `${info.emoji} <b>${label}</b>\n\n✅ ${isEs ? '¡Todo al día! No tienes ideas pendientes.' : 'All up to date! No pending ideas.'}`,
+      rows: null,
+    };
+  }
+
+  const lines = ideas.map((idea, i) => {
+    const note = idea.notes ? ` — <i>${idea.notes.slice(0, 50)}${idea.notes.length > 50 ? '…' : ''}</i>` : '';
+    return `${i + 1}. 🔗 ${idea.link}${note}`;
+  });
+
+  const html = `${info.emoji} <b>${label}</b> (${ideas.length})\n\n` + lines.join('\n');
+
+  const rows = [
+    ...ideas.map((idea, i) => [
+      { text: `✅ #${i + 1} ${isEs ? 'Completada' : 'Done'}`, callback_data: `idea_complete_${idea.id}` },
+    ]),
+    [{ text: isEs ? '📄 Descargar PDF' : '📄 Download PDF', callback_data: `ideas_pdf_${type}` }],
+  ];
+
+  return { html, rows };
+}
+
+function buildLanguageDashboard(lang) {
+  const isEs = lang === 'es';
+  return {
+    html : isEs ? '🌐 <b>Idioma</b>\n\nElige tu idioma:' : '🌐 <b>Language</b>\n\nChoose your language:',
+    rows : [[
+      { text: '🇬🇧 English', callback_data: 'menu_lang_en' },
+      { text: '🇪🇸 Español', callback_data: 'menu_lang_es' },
+    ]],
+  };
+}
+
+// ── Outbound: send request card to model ──────────────────────────────────────
 
 async function sendRequestToModel(ticket, model) {
   if (!bot || !model.telegram_chat_id) return;
@@ -151,34 +344,23 @@ async function sendRequestToModel(ticket, model) {
   const lang        = model.language || 'en';
   const priorityTag = ticket.priority === 'urgent' ? t(lang, 'priorityUrgent') : t(lang, 'priorityNormal');
   const priceStr    = ticket.price ? `$${ticket.price}` : t(lang, 'notSpecified');
-  const estStr      = ticket.client_estimated_time ?? t(lang, 'notSpecified');
 
-  // Translate description and estimate to model's language if needed
-  const descriptionRaw = lang === 'es'
-    ? await translate(ticket.description, 'es')
-    : ticket.description;
-  const estimateRaw = (lang === 'es' && ticket.client_estimated_time)
-    ? await translate(ticket.client_estimated_time, 'es')
-    : estStr;
+  const descRaw = lang === 'es' ? await translate(ticket.description, 'es') : ticket.description;
+  const estRaw  = (lang === 'es' && ticket.client_estimated_time) ? await translate(ticket.client_estimated_time, 'es') : (ticket.client_estimated_time ?? t(lang, 'notSpecified'));
 
-  // Escape all user-provided content for MarkdownV2
-  const description     = escapeMd(descriptionRaw);
-  const estimateDisplay = escapeMd(estimateRaw);
-  const priceSafe       = escapeMd(priceStr);
-
-  const text =
+  const html =
     `${t(lang, 'newRequest', ticket.ticket_number)}\n\n` +
     `👤 ${t(lang, 'chatterLabel')}\n` +
     `📁 ${t(lang, 'fieldType')}: ${typeLabel(ticket.type, lang)}\n` +
     `⚡ ${t(lang, 'fieldPriority')}: ${priorityTag}\n` +
-    `💰 ${t(lang, 'fieldPrice')}: ${priceSafe}\n` +
-    `⏱ ${t(lang, 'fieldEstimate')}: ${estimateDisplay}\n\n` +
-    `${t(lang, 'fieldDetails')}\n${description}`;
+    `💰 ${t(lang, 'fieldPrice')}: ${priceStr}\n` +
+    `⏱ ${t(lang, 'fieldEstimate')}: ${estRaw}\n\n` +
+    `${t(lang, 'fieldDetails')}\n${descRaw}`;
 
   try {
-    const msg = await bot.sendMessage(model.telegram_chat_id, text, {
-      parse_mode: 'MarkdownV2',
-      reply_markup: requestKeyboard(ticket.id, lang),
+    const msg = await bot.sendMessage(model.telegram_chat_id, html, {
+      parse_mode   : 'HTML',
+      reply_markup : requestKeyboard(ticket.id, lang),
     });
     db.updateTicketTelegram(ticket.id, String(msg.message_id));
   } catch (err) {
@@ -186,7 +368,7 @@ async function sendRequestToModel(ticket, model) {
   }
 }
 
-// ── Forward chatter message to model ─────────────────────────────────────────
+// ── Outbound: forward chatter message ────────────────────────────────────────
 
 async function forwardToModel(ticketId, _chatterName, message) {
   if (!bot) return;
@@ -194,20 +376,59 @@ async function forwardToModel(ticketId, _chatterName, message) {
   const model  = db.getModel(ticket.model_id);
   if (!model?.telegram_chat_id) return;
 
-  const lang = model.language || 'en';
-  // Translate chatter message to model's language if needed
+  const lang       = model.language || 'en';
   const translated = lang === 'es' ? await translate(message, 'es') : message;
-  // Escape special MarkdownV2 characters in the message
-  const escaped = translated.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
-  const text = `${t(lang, 'supportLabel')} ${escaped}`;
 
-  await bot.sendMessage(model.telegram_chat_id, text, {
-    parse_mode: 'MarkdownV2',
-    reply_markup: replyKeyboard(ticketId, lang),
+  await bot.sendMessage(model.telegram_chat_id, `${t(lang, 'supportLabel')} ${translated}`, {
+    parse_mode   : 'HTML',
+    reply_markup : replyKeyboard(ticketId, lang),
   });
 }
 
-// ── Post to Discord ticket channel ────────────────────────────────────────────
+// ── Outbound: notify model chatter cancelled ──────────────────────────────────
+
+async function notifyModelCancelledByChatter(ticketId, reason) {
+  if (!bot) return;
+  const ticket = db.getTicket(ticketId);
+  const model  = ticket ? db.getModel(ticket.model_id) : null;
+  if (!model?.telegram_chat_id) return;
+
+  const lang = model.language || 'en';
+  const msg  = lang === 'es'
+    ? `🚫 La solicitud <b>#${ticket.ticket_number}</b> fue cancelada por Soporte.\n\n<b>Motivo:</b> ${reason}`
+    : `🚫 Request <b>#${ticket.ticket_number}</b> was cancelled by Support.\n\n<b>Reason:</b> ${reason}`;
+
+  try {
+    await bot.sendMessage(model.telegram_chat_id, msg, { parse_mode: 'HTML' });
+  } catch (err) {
+    console.error('[Telegram] Failed to notify model of chatter cancellation:', err.message);
+  }
+}
+
+// ── Outbound: send idea card to model ─────────────────────────────────────────
+
+async function sendIdeaToModel(idea, model) {
+  if (!bot || !model.telegram_chat_id) return null;
+
+  const info = { reddit: { emoji: '💡', label: 'Reddit' }, reels: { emoji: '🎬', label: 'Instagram Reels' } }[idea.type] ?? { emoji: '📋', label: idea.type };
+  const notes = idea.notes ? `\n\n📝 <b>Notas:</b>\n${idea.notes}` : '';
+
+  const html = `${info.emoji} <b>Nueva Idea — ${info.label}</b>\n\n🔗 <b>Link:</b> ${idea.link}${notes}`;
+
+  try {
+    const msg = await bot.sendMessage(model.telegram_chat_id, html, {
+      parse_mode  : 'HTML',
+      reply_markup: { inline_keyboard: [[{ text: '✅ Marcar como completada', callback_data: `idea_complete_${idea.id}` }]] },
+      disable_web_page_preview: true,
+    });
+    return msg.message_id;
+  } catch (err) {
+    console.error('[Telegram] Failed to send idea to model:', err.message);
+    return null;
+  }
+}
+
+// ── Discord ticket channel helper ─────────────────────────────────────────────
 
 async function postToTicketChannel(ticketId, embed, components) {
   const ticket = db.getTicket(ticketId);
@@ -220,13 +441,7 @@ async function postToTicketChannel(ticketId, embed, components) {
   }
 }
 
-function modelLang(ticketId) {
-  const ticket = db.getTicket(ticketId);
-  const model  = ticket ? db.getModel(ticket.model_id) : null;
-  return model?.language || 'en';
-}
-
-// ── Handle accept ─────────────────────────────────────────────────────────────
+// ── Ticket action handlers ────────────────────────────────────────────────────
 
 async function handleAccept(chatId, ticketId, days) {
   const ticket = db.getTicket(ticketId);
@@ -236,17 +451,14 @@ async function handleAccept(chatId, ticketId, days) {
   db.updateTicketStatus(ticketId, 'accepted', { modelEstimatedDays: days });
   db.addTicketMessage(ticketId, 'system', 'Clark', `✅ Accepted — estimated delivery: ${days} day(s)`);
 
-  const embed = new EmbedBuilder()
+  await postToTicketChannel(ticketId, new EmbedBuilder()
     .setColor(0x2ecc71)
     .setTitle(`✅ Request #${ticket.ticket_number} Accepted`)
     .addFields({ name: 'Estimated delivery', value: `${days} day(s)` })
-    .setTimestamp();
+    .setTimestamp());
 
-  await postToTicketChannel(ticketId, embed);
-  await bot.sendMessage(chatId, t(lang, 'accepted', days), { reply_markup: replyKeyboard(ticketId, lang) });
+  await bot.sendMessage(chatId, t(lang, 'accepted', days), { parse_mode: 'HTML' });
 }
-
-// ── Handle deny ───────────────────────────────────────────────────────────────
 
 async function handleDeny(chatId, ticketId, reason) {
   const ticket = db.getTicket(ticketId);
@@ -256,17 +468,14 @@ async function handleDeny(chatId, ticketId, reason) {
   db.updateTicketStatus(ticketId, 'denied', { denyReason: reason });
   db.addTicketMessage(ticketId, 'system', 'Clark', `❌ Denied — reason: ${reason}`);
 
-  const embed = new EmbedBuilder()
+  await postToTicketChannel(ticketId, new EmbedBuilder()
     .setColor(0xe74c3c)
     .setTitle(`❌ Request #${ticket.ticket_number} Denied`)
     .addFields({ name: 'Reason', value: reason })
-    .setTimestamp();
+    .setTimestamp());
 
-  await postToTicketChannel(ticketId, embed);
-  await bot.sendMessage(chatId, t(lang, 'denied'));
+  await bot.sendMessage(chatId, t(lang, 'denied'), { parse_mode: 'HTML' });
 }
-
-// ── Handle question from model ────────────────────────────────────────────────
 
 async function handleQuestion(chatId, ticketId, question) {
   const ticket = db.getTicket(ticketId);
@@ -274,21 +483,16 @@ async function handleQuestion(chatId, ticketId, question) {
   const lang = modelLang(ticketId);
 
   db.addTicketMessage(ticketId, 'model', 'Model', question);
+  const forDiscord = lang === 'es' ? await translate(question, 'en') : question;
 
-  // Translate model's question to English for Discord
-  const questionForDiscord = lang === 'es' ? await translate(question, 'en') : question;
-
-  const embed = new EmbedBuilder()
+  await postToTicketChannel(ticketId, new EmbedBuilder()
     .setColor(0xf39c12)
     .setTitle(`💬 Model has a question — #${ticket.ticket_number}`)
-    .setDescription(questionForDiscord)
-    .setTimestamp();
+    .setDescription(forDiscord)
+    .setTimestamp());
 
-  await postToTicketChannel(ticketId, embed);
-  await bot.sendMessage(chatId, t(lang, 'questionSent'), { reply_markup: replyKeyboard(ticketId, lang) });
+  await bot.sendMessage(chatId, t(lang, 'questionSent'), { parse_mode: 'HTML' });
 }
-
-// ── Handle reply from model ───────────────────────────────────────────────────
 
 async function handleModelReply(chatId, ticketId, message) {
   const ticket = db.getTicket(ticketId);
@@ -297,21 +501,16 @@ async function handleModelReply(chatId, ticketId, message) {
   const model = db.getModel(ticket.model_id);
 
   db.addTicketMessage(ticketId, 'model', model?.name ?? 'Model', message);
+  const forDiscord = lang === 'es' ? await translate(message, 'en') : message;
 
-  // Translate model's reply to English for Discord
-  const messageForDiscord = lang === 'es' ? await translate(message, 'en') : message;
-
-  const embed = new EmbedBuilder()
+  await postToTicketChannel(ticketId, new EmbedBuilder()
     .setColor(0x9b59b6)
     .setAuthor({ name: `${model?.name ?? 'Model'} — Reply` })
-    .setDescription(messageForDiscord)
-    .setTimestamp();
+    .setDescription(forDiscord)
+    .setTimestamp());
 
-  await postToTicketChannel(ticketId, embed);
-  await bot.sendMessage(chatId, t(lang, 'messageSent'), { reply_markup: replyKeyboard(ticketId, lang) });
+  await bot.sendMessage(chatId, t(lang, 'messageSent'), { parse_mode: 'HTML' });
 }
-
-// ── Handle done ───────────────────────────────────────────────────────────────
 
 async function handleDone(chatId, ticketId) {
   const ticket = db.getTicket(ticketId);
@@ -321,12 +520,6 @@ async function handleDone(chatId, ticketId) {
   db.updateTicketStatus(ticketId, 'delivered');
   db.addTicketMessage(ticketId, 'system', 'Clark', '📦 Model marked as delivered.');
 
-  const embed = new EmbedBuilder()
-    .setColor(0x2ecc71)
-    .setTitle(`📦 Content Delivered — #${ticket.ticket_number}`)
-    .setDescription('The model has marked this request as delivered. Please confirm receipt.')
-    .setTimestamp();
-
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`req_received_${ticketId}`)
@@ -334,11 +527,17 @@ async function handleDone(chatId, ticketId) {
       .setStyle(ButtonStyle.Success)
   );
 
-  await postToTicketChannel(ticketId, embed, [row]);
-  await bot.sendMessage(chatId, t(lang, 'delivered'));
-}
+  await postToTicketChannel(ticketId,
+    new EmbedBuilder()
+      .setColor(0x2ecc71)
+      .setTitle(`📦 Content Delivered — #${ticket.ticket_number}`)
+      .setDescription('The model has marked this request as delivered. Please confirm receipt.')
+      .setTimestamp(),
+    [row]
+  );
 
-// ── Handle cancel by model ────────────────────────────────────────────────────
+  await bot.sendMessage(chatId, t(lang, 'delivered'), { parse_mode: 'HTML' });
+}
 
 async function handleCancelByModel(chatId, ticketId, reason) {
   const ticket = db.getTicket(ticketId);
@@ -348,53 +547,13 @@ async function handleCancelByModel(chatId, ticketId, reason) {
   db.updateTicketStatus(ticketId, 'cancelled');
   db.addTicketMessage(ticketId, 'system', 'Clark', `🚫 Cancelled by model — reason: ${reason}`);
 
-  const embed = new EmbedBuilder()
+  await postToTicketChannel(ticketId, new EmbedBuilder()
     .setColor(0x95a5a6)
     .setTitle(`🚫 Request #${ticket.ticket_number} Cancelled by Model`)
     .addFields({ name: 'Reason', value: reason })
-    .setTimestamp();
+    .setTimestamp());
 
-  await postToTicketChannel(ticketId, embed);
-  await bot.sendMessage(chatId, t(lang, 'cancelled'));
-}
-
-// ── Send a single idea to model via Telegram ──────────────────────────────────
-
-async function sendIdeaToModel(idea, model) {
-  if (!bot || !model.telegram_chat_id) return null;
-
-  const typeInfo = {
-    reddit: { emoji: '💡', label: 'Reddit' },
-    reels:  { emoji: '🎬', label: 'Instagram Reels' },
-  };
-  const info = typeInfo[idea.type] ?? typeInfo.reels;
-
-  const notesSection = idea.notes
-    ? `\n\n📝 <b>Notas:</b>\n${idea.notes}`
-    : '';
-
-  const text =
-    `${info.emoji} <b>Nueva Idea — ${info.label}</b>\n\n` +
-    `🔗 <b>Link:</b> ${idea.link}` +
-    notesSection;
-
-  const keyboard = {
-    inline_keyboard: [[
-      { text: '✅ Marcar como completada', callback_data: `idea_complete_${idea.id}` },
-    ]],
-  };
-
-  try {
-    const msg = await bot.sendMessage(model.telegram_chat_id, text, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard,
-      disable_web_page_preview: true,
-    });
-    return msg.message_id;
-  } catch (err) {
-    console.error('[Telegram] Failed to send idea to model:', err.message);
-    return null;
-  }
+  await bot.sendMessage(chatId, t(lang, 'cancelled'), { parse_mode: 'HTML' });
 }
 
 // ── Start bot ─────────────────────────────────────────────────────────────────
@@ -403,81 +562,26 @@ function startTelegramBot(client) {
   discordClient = client;
 
   if (!process.env.TELEGRAM_BOT_TOKEN) {
-    console.log('[Telegram] TELEGRAM_BOT_TOKEN not set — ticket system disabled.');
+    console.log('[Telegram] TELEGRAM_BOT_TOKEN not set — Telegram disabled.');
     return null;
   }
 
   bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
-    polling: {
-      interval: 2000,
-      autoStart: true,
-      params: { timeout: 10 },
-    },
+    polling: { interval: 2000, autoStart: true, params: { timeout: 10 } },
   });
 
-  // /changelanguagespanish  — switch to Spanish
-  bot.onText(/\/changelanguagespanish/, async (msg) => {
-    const chatId = String(msg.chat.id);
-    const model  = db.getModelByTelegramId(chatId);
-    if (!model?.linked) {
-      return bot.sendMessage(chatId, '❌ Your account is not linked yet\\. Use `/start CLARK\\-XXXXXX` to link it\\.', { parse_mode: 'MarkdownV2' });
-    }
-    db.setModelLanguage(model.id, 'es');
-    return bot.sendMessage(chatId, '✅ ¡Idioma cambiado a *Español*\\! A partir de ahora recibirás todas las solicitudes en español\\.', { parse_mode: 'MarkdownV2' });
-  });
-
-  // /changelanguageenglish  — switch to English
-  bot.onText(/\/changelanguageenglish/, async (msg) => {
-    const chatId = String(msg.chat.id);
-    const model  = db.getModelByTelegramId(chatId);
-    if (!model?.linked) {
-      return bot.sendMessage(chatId, '❌ Your account is not linked yet\\. Use `/start CLARK\\-XXXXXX` to link it\\.', { parse_mode: 'MarkdownV2' });
-    }
-    db.setModelLanguage(model.id, 'en');
-    return bot.sendMessage(chatId, '✅ Language changed to *English*\\! You will now receive all requests in English\\.', { parse_mode: 'MarkdownV2' });
-  });
-
-  // /pendientes  — send PDF of pending ideas
-  bot.onText(/\/pendientes/, async (msg) => {
-    const chatId = String(msg.chat.id);
-    const model  = db.getModelByTelegramId(chatId);
-
-    if (!model?.linked) {
-      return bot.sendMessage(chatId, '❌ Tu cuenta no está vinculada. Usa /start CLARK-XXXXXX para conectarla.');
-    }
-
-    const ideas = db.getModelPendingIdeas(model.id);
-    if (!ideas.length) {
-      return bot.sendMessage(chatId, '✅ No tienes ideas pendientes por ahora. ¡Todo al día!');
-    }
-
-    try {
-      const pdfBuffer = await generatePendingIdeasPdf(ideas, model.name);
-      await bot.sendDocument(
-        chatId,
-        pdfBuffer,
-        { caption: `📋 Tienes <b>${ideas.length}</b> idea(s) pendiente(s).`, parse_mode: 'HTML' },
-        { filename: `pendientes_${model.name.replace(/\s+/g, '_')}.pdf`, contentType: 'application/pdf' },
-      );
-    } catch (err) {
-      console.error('[Telegram] /pendientes PDF error:', err.message);
-      await bot.sendMessage(chatId, '❌ Error generando el PDF. Inténtalo de nuevo.');
-    }
-  });
-
-  // /start CLARK-CODE  or  /start  (no code)
+  // /start  or  /start CLARK-CODE
   bot.onText(/\/start(.*)/, async (msg, match) => {
     const chatId  = String(msg.chat.id);
     const rawArg  = (match[1] ?? '').trim().toUpperCase();
     const rawCode = rawArg.startsWith('CLARK-') ? rawArg.slice(6) : rawArg;
 
-    // If already linked, greet
     const existing = db.getModelByTelegramId(chatId);
     if (existing?.linked) {
-      return bot.sendMessage(chatId, t(existing.language || 'en', 'alreadyLinked'));
+      const dash = buildHomeDashboard(existing);
+      return refreshMenuKeyboard(chatId, existing.language || 'en', dash.html);
     }
 
-    // Show language selector. If they passed a code, store it.
     if (rawCode) pendingLink.set(chatId, rawCode);
 
     return bot.sendMessage(chatId, t('en', 'chooseLanguage'), {
@@ -485,227 +589,242 @@ function startTelegramBot(client) {
     });
   });
 
-  // Callback queries (button taps)
+  // /menu  — re-show the persistent keyboard
+  bot.onText(/\/menu/, async (msg) => {
+    const chatId = String(msg.chat.id);
+    const model  = db.getModelByTelegramId(chatId);
+    if (!model?.linked) {
+      return bot.sendMessage(chatId, '❌ Use /start CLARK-XXXXXX to link your account first.');
+    }
+    const dash = buildHomeDashboard(model);
+    return refreshMenuKeyboard(chatId, model.language || 'en', dash.html);
+  });
+
+  // Callback queries
   bot.on('callback_query', async (query) => {
     const data   = query.data;
     const chatId = String(query.message.chat.id);
     await bot.answerCallbackQuery(query.id);
 
-    // ── Language selection ──────────────────────────────────────────────────
-    if (data === 'lang_en' || data === 'lang_es') {
-      const lang = data === 'lang_es' ? 'es' : 'en';
+    const model = db.getModelByTelegramId(chatId);
+    const lang  = model?.language || 'en';
 
-      // Check if we have a pending code for this chat
-      const pendingCode = pendingLink.get(chatId);
+    // ── Initial language selection (linking flow) ───────────────────────
+    if (data === 'lang_en' || data === 'lang_es') {
+      const selectedLang = data === 'lang_es' ? 'es' : 'en';
+      const pendingCode  = pendingLink.get(chatId);
       pendingLink.delete(chatId);
 
-      if (pendingCode) {
-        // Complete the linking
-        const model = db.getModelByLinkCode(pendingCode);
-        if (!model) return bot.sendMessage(chatId, t(lang, 'invalidCode'));
-        if (model.linked) return bot.sendMessage(chatId, t(lang, 'alreadyLinked'));
+      if (pendingCode && !pendingCode.startsWith('__lang_')) {
+        const m = db.getModelByLinkCode(pendingCode);
+        if (!m) return bot.sendMessage(chatId, t(selectedLang, 'invalidCode'), { parse_mode: 'HTML' });
+        if (m.linked) return bot.sendMessage(chatId, t(selectedLang, 'alreadyLinked'), { parse_mode: 'HTML' });
 
-        db.linkModelTelegram(model.id, chatId);
-        db.setModelLanguage(model.id, lang);
-        console.log(`[Telegram] Model "${model.name}" linked (lang=${lang}) to chat ${chatId}`);
-        return bot.sendMessage(chatId, t(lang, 'linked', model.name), { parse_mode: 'MarkdownV2' });
+        db.linkModelTelegram(m.id, chatId);
+        db.setModelLanguage(m.id, selectedLang);
+        console.log(`[Telegram] Model "${m.name}" linked (lang=${selectedLang})`);
+
+        const html = t(selectedLang, 'linked', m.name);
+        return refreshMenuKeyboard(chatId, selectedLang, html);
       }
 
-      // No pending code — store language in pending and ask for code
-      pendingLink.set(chatId, `__lang_${lang}`);
-      return bot.sendMessage(chatId, t(lang, 'sendCode'), { parse_mode: 'Markdown' });
+      pendingLink.set(chatId, `__lang_${selectedLang}`);
+      return bot.sendMessage(chatId, t(selectedLang, 'sendCode'), { parse_mode: 'HTML' });
     }
 
-    // ── Idea complete callback ──────────────────────────────────────────────
-    if (data.startsWith('idea_complete_')) {
-      const ideaId = parseInt(data.replace('idea_complete_', ''), 10);
-      const idea   = db.getIdea(ideaId);
+    // ── Menu: language change ───────────────────────────────────────────
+    if (data === 'menu_lang_en' || data === 'menu_lang_es') {
+      if (!model?.linked) return;
+      const newLang = data === 'menu_lang_es' ? 'es' : 'en';
+      db.setModelLanguage(model.id, newLang);
+      const isEs = newLang === 'es';
+      const confirmation = isEs
+        ? `✅ ¡Idioma cambiado a <b>Español</b>!`
+        : `✅ Language changed to <b>English</b>!`;
+      return refreshMenuKeyboard(chatId, newLang, confirmation);
+    }
 
-      if (!idea || idea.status === 'completed') return; // already done
+    // ── Idea completed ──────────────────────────────────────────────────
+    if (data.startsWith('idea_complete_')) {
+      const ideaId   = parseInt(data.replace('idea_complete_', ''), 10);
+      const idea     = db.getIdea(ideaId);
+      if (!idea || idea.status === 'completed') return;
 
       const completed = db.completeIdea(ideaId);
-
-      // Update Airtable async (fire-and-forget)
       if (completed.airtable_record_id) {
         markIdeaCompleted(completed.airtable_record_id, completed.completed_at)
-          .catch(err => console.error('[Airtable] Failed to mark idea completed:', err.message));
+          .catch(err => console.error('[Airtable] markIdeaCompleted error:', err.message));
       }
 
-      // Edit the Telegram message to show it's done
-      const typeInfo = {
-        reddit: { emoji: '💡', label: 'Reddit' },
-        reels:  { emoji: '🎬', label: 'Instagram Reels' },
-      };
-      const info        = typeInfo[completed.type] ?? typeInfo.reels;
-      const notesLine   = completed.notes ? `\n📝 <b>Notas:</b> ${completed.notes}` : '';
-      const doneText    =
-        `✅ <b>¡Idea completada!</b>\n\n` +
-        `${info.emoji} <b>${info.label}</b>\n` +
-        `🔗 ${completed.link}` +
-        notesLine;
-
+      // Edit the original idea card to show it's done
+      const info     = { reddit: '💡', reels: '🎬' }[completed.type] ?? '📋';
+      const noteTag  = completed.notes ? `\n📝 ${completed.notes}` : '';
+      const doneHtml = `✅ <b>¡Completada!</b>\n\n${info} ${completed.link}${noteTag}`;
       try {
-        await bot.editMessageText(doneText, {
+        await bot.editMessageText(doneHtml, {
           chat_id    : query.message.chat.id,
           message_id : query.message.message_id,
           parse_mode : 'HTML',
           disable_web_page_preview: true,
         });
-      } catch (e) {
-        console.error('[Telegram] Failed to edit idea message:', e.message);
+      } catch (_) {}
+
+      // Also refresh the dashboard if it's showing that ideas type
+      if (model) {
+        const dash = buildIdeasDashboard(model, completed.type);
+        await updateDashboard(chatId, lang, dash.html, dash.rows);
       }
       return;
     }
 
-    // ── Ticket callbacks ────────────────────────────────────────────────────
-    // data format: tg_action_ticketId
+    // ── Ideas PDF download ──────────────────────────────────────────────
+    if (data.startsWith('ideas_pdf_')) {
+      if (!model) return;
+      const type  = data.replace('ideas_pdf_', '');
+      const ideas = db.getModelPendingIdeas(model.id).filter(i => i.type === type);
+      const isEs  = lang === 'es';
+
+      if (!ideas.length) {
+        return bot.sendMessage(chatId, isEs ? '✅ No hay ideas pendientes.' : '✅ No pending ideas.', { parse_mode: 'HTML' });
+      }
+      try {
+        const buf = await generatePendingIdeasPdf(ideas, model.name);
+        await bot.sendDocument(
+          chatId, buf,
+          { caption: isEs ? `📋 <b>${ideas.length}</b> idea(s) pendiente(s).` : `📋 <b>${ideas.length}</b> pending idea(s).`, parse_mode: 'HTML' },
+          { filename: `pendientes_${type}_${model.name.replace(/\s+/g, '_')}.pdf`, contentType: 'application/pdf' }
+        );
+      } catch (err) {
+        console.error('[Telegram] PDF error:', err.message);
+        await bot.sendMessage(chatId, '❌ Error generating PDF. Try again.', { parse_mode: 'HTML' });
+      }
+      return;
+    }
+
+    // ── Ticket inline buttons (tg_action_ticketId) ──────────────────────
     const parts    = data.split('_');
     const action   = parts[1];
     const ticketId = parseInt(parts[2]);
-    const lang     = modelLang(ticketId) || 'en';
+    const tLang    = modelLang(ticketId) || 'en';
 
     if (action === 'accept') {
       pendingActions.set(chatId, { action: 'accept_days', ticketId });
-      await bot.sendMessage(chatId, t(lang, 'askDays'));
-
+      await bot.sendMessage(chatId, t(tLang, 'askDays'), { parse_mode: 'HTML' });
     } else if (action === 'deny') {
       pendingActions.set(chatId, { action: 'deny_reason', ticketId });
-      await bot.sendMessage(chatId, t(lang, 'askDenyReason'));
-
+      await bot.sendMessage(chatId, t(tLang, 'askDenyReason'), { parse_mode: 'HTML' });
     } else if (action === 'question') {
       pendingActions.set(chatId, { action: 'ask_question', ticketId });
-      await bot.sendMessage(chatId, t(lang, 'askQuestion'));
-
+      await bot.sendMessage(chatId, t(tLang, 'askQuestion'), { parse_mode: 'HTML' });
     } else if (action === 'reply') {
       pendingActions.set(chatId, { action: 'reply', ticketId });
-      await bot.sendMessage(chatId, t(lang, 'askReply'));
-
+      await bot.sendMessage(chatId, t(tLang, 'askReply'), { parse_mode: 'HTML' });
     } else if (action === 'done') {
       await handleDone(chatId, ticketId);
-
+      if (model) {
+        const dash = buildCustomsDashboard(model);
+        await updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
     } else if (action === 'cancel') {
       pendingActions.set(chatId, { action: 'cancel_reason', ticketId });
-      await bot.sendMessage(chatId, t(lang, 'askCancelReason'));
+      await bot.sendMessage(chatId, t(tLang, 'askCancelReason'), { parse_mode: 'HTML' });
     }
   });
 
-  // Text messages — handle pending actions + code entry
+  // Text messages — menu buttons, pending actions, code entry
   bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
 
     const chatId = String(msg.chat.id);
     const text   = msg.text.trim();
+    const model  = db.getModelByTelegramId(chatId);
+    const lang   = model?.language || 'en';
 
-    // Pending action for an open ticket
+    // ── Pending ticket action ──────────────────────────────────────────
     const pending = pendingActions.get(chatId);
     if (pending) {
       pendingActions.delete(chatId);
       const { action, ticketId } = pending;
-      const lang = modelLang(ticketId) || 'en';
+      const tLang = modelLang(ticketId) || 'en';
 
       if (action === 'accept_days') {
         const days = parseInt(text);
         if (isNaN(days) || days < 1) {
-          await bot.sendMessage(chatId, t(lang, 'invalidDays'));
+          await bot.sendMessage(chatId, t(tLang, 'invalidDays'), { parse_mode: 'HTML' });
           pendingActions.set(chatId, { action: 'accept_days', ticketId });
           return;
         }
-        return handleAccept(chatId, ticketId, days);
-
+        await handleAccept(chatId, ticketId, days);
       } else if (action === 'deny_reason') {
-        return handleDeny(chatId, ticketId, text);
-
+        await handleDeny(chatId, ticketId, text);
       } else if (action === 'ask_question') {
-        return handleQuestion(chatId, ticketId, text);
-
+        await handleQuestion(chatId, ticketId, text);
       } else if (action === 'reply') {
-        return handleModelReply(chatId, ticketId, text);
-
+        await handleModelReply(chatId, ticketId, text);
       } else if (action === 'cancel_reason') {
-        return handleCancelByModel(chatId, ticketId, text);
+        await handleCancelByModel(chatId, ticketId, text);
+      }
+
+      // Refresh customs dashboard after any ticket action
+      if (model) {
+        const dash = buildCustomsDashboard(model);
+        await updateDashboard(chatId, lang, dash.html, dash.rows);
       }
       return;
     }
 
-    // Pending language+code flow: user typed the code manually
+    // ── Menu buttons ───────────────────────────────────────────────────
+    if (model?.linked) {
+      const m = MENU[lang] ?? MENU.en;
+
+      if (text === m.customs) {
+        const dash = buildCustomsDashboard(model);
+        return updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
+      if (text === m.reels) {
+        const dash = buildIdeasDashboard(model, 'reels');
+        return updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
+      if (text === m.reddit) {
+        const dash = buildIdeasDashboard(model, 'reddit');
+        return updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
+      if (text === m.lang) {
+        const dash = buildLanguageDashboard(lang);
+        return updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
+    }
+
+    // ── Pending link flow: code entry via text ─────────────────────────
     const pendingRaw = pendingLink.get(chatId);
-    if (pendingRaw && pendingRaw.startsWith('__lang_')) {
-      const lang    = pendingRaw.replace('__lang_', '');
+    if (pendingRaw?.startsWith('__lang_')) {
+      const selectedLang = pendingRaw.replace('__lang_', '');
       const rawCode = text.toUpperCase().startsWith('CLARK-') ? text.toUpperCase().slice(6) : text.toUpperCase();
       pendingLink.delete(chatId);
 
-      const model = db.getModelByLinkCode(rawCode);
-      if (!model) return bot.sendMessage(chatId, t(lang, 'invalidCode'));
-      if (model.linked) return bot.sendMessage(chatId, t(lang, 'alreadyLinked'));
+      const m = db.getModelByLinkCode(rawCode);
+      if (!m) return bot.sendMessage(chatId, t(selectedLang, 'invalidCode'), { parse_mode: 'HTML' });
+      if (m.linked) return bot.sendMessage(chatId, t(selectedLang, 'alreadyLinked'), { parse_mode: 'HTML' });
 
-      db.linkModelTelegram(model.id, chatId);
-      db.setModelLanguage(model.id, lang);
-      console.log(`[Telegram] Model "${model.name}" linked via text (lang=${lang}) to chat ${chatId}`);
-      return bot.sendMessage(chatId, t(lang, 'linked', model.name), { parse_mode: 'MarkdownV2' });
+      db.linkModelTelegram(m.id, chatId);
+      db.setModelLanguage(m.id, selectedLang);
+      console.log(`[Telegram] Model "${m.name}" linked via text (lang=${selectedLang})`);
+
+      return refreshMenuKeyboard(chatId, selectedLang, t(selectedLang, 'linked', m.name));
     }
   });
 
   bot.on('polling_error', (err) => {
     console.error('[Telegram] Polling error:', err.message);
-    // 409 Conflict = another instance still running (Railway rolling restart).
-    // Stop polling and retry after 15s so only one instance is active.
-    if (err.message && err.message.includes('409')) {
-      console.warn('[Telegram] 409 Conflict — another instance detected. Retrying in 15s...');
+    if (err.message?.includes('409')) {
+      console.warn('[Telegram] 409 Conflict — retrying in 15s...');
       bot.stopPolling().catch(() => {});
-      setTimeout(() => {
-        bot.startPolling().catch(e => console.error('[Telegram] Failed to restart polling:', e.message));
-      }, 15000);
+      setTimeout(() => bot.startPolling().catch(e => console.error('[Telegram] Restart error:', e.message)), 15000);
     }
   });
 
-  console.log('[Telegram] Bot started.');
+  console.log('[Telegram] Bot started with persistent menu.');
   return bot;
 }
 
-// ── Notify model that chatter cancelled the request ───────────────────────────
-
-async function notifyModelCancelledByChatter(ticketId, reason) {
-  if (!bot) return;
-  const ticket = db.getTicket(ticketId);
-  const model  = ticket ? db.getModel(ticket.model_id) : null;
-  if (!model?.telegram_chat_id) return;
-
-  const lang    = model.language || 'en';
-  const escaped = reason.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
-
-  const msgs = {
-    en: `🚫 *Request \\#${ticket.ticket_number} was cancelled by Support\\.*\n\n*Reason:* ${escaped}`,
-    es: `🚫 *La solicitud \\#${ticket.ticket_number} fue cancelada por Soporte\\.*\n\n*Motivo:* ${escaped}`,
-  };
-
-  try {
-    await bot.sendMessage(model.telegram_chat_id, msgs[lang] ?? msgs.en, { parse_mode: 'MarkdownV2' });
-  } catch (err) {
-    console.error('[Telegram] Failed to notify model of chatter cancellation:', err.message);
-  }
-}
-
 module.exports = { startTelegramBot, sendRequestToModel, forwardToModel, notifyModelCancelledByChatter, sendIdeaToModel };
-
-// ── Notify model of new content ideas ────────────────────────────────────────
-
-async function notifyModelNewIdeas(model, type) {
-  if (!bot) throw new Error('Telegram bot not started');
-  if (!model?.telegram_chat_id) throw new Error('Model has no Telegram linked');
-
-  const lang = model.language || 'en';
-
-  const msgs = {
-    reddit: {
-      en: `💡 *New Reddit ideas are ready for you\\!*\n\nHead over to *Notion* and check your new content ideas\\.`,
-      es: `💡 *¡Tienes nuevas ideas de Reddit esperándote\\!*\n\nEntra a *Notion* y revisa las nuevas ideas de contenido para ti\\.`,
-    },
-    reels: {
-      en: `🎬 *New Instagram Reels ideas are ready for you\\!*\n\nHead over to *Notion* and check your new content ideas\\.`,
-      es: `🎬 *¡Tienes nuevas ideas de Reels de Instagram esperándote\\!*\n\nEntra a *Notion* y revisa las nuevas ideas de contenido para ti\\.`,
-    },
-  };
-
-  const msg = (msgs[type] ?? msgs.reels)[lang] ?? (msgs[type] ?? msgs.reels).en;
-  await bot.sendMessage(model.telegram_chat_id, msg, { parse_mode: 'MarkdownV2' });
-}
