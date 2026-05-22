@@ -21,11 +21,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setColor(0xff4500)
-      .setTitle('💡 New Reddit Ideas Available')
+      .setTitle('💡 Send Reddit Idea')
       .setDescription(
-        'Click the button below to notify a model that new Reddit content ideas are ready for her in **Notion**.'
+        'Click the button below to send a Reddit content idea directly to a model on **Telegram**.'
       )
-      .setFooter({ text: 'The model will receive a Telegram notification instantly.' });
+      .setFooter({ text: 'The model will receive the idea instantly and can mark it as completed.' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()

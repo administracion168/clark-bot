@@ -21,11 +21,11 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setColor(0xe1306c)
-      .setTitle('💡 New Instagram Reels Ideas Available')
+      .setTitle('🎬 Send Instagram Reels Idea')
       .setDescription(
-        'Click the button below to notify a model that new Instagram Reels content ideas are ready for her in **Notion**.'
+        'Click the button below to send an Instagram Reels content idea directly to a model on **Telegram**.'
       )
-      .setFooter({ text: 'The model will receive a Telegram notification instantly.' });
+      .setFooter({ text: 'The model will receive the idea instantly and can mark it as completed.' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
