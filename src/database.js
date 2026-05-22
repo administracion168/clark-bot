@@ -329,8 +329,14 @@ function deactivateModel(id) {
   ).run(id);
 }
 
+function setModelAirtableTableId(id, airtableTableId) {
+  db.prepare('UPDATE models SET airtable_table_id = ? WHERE id = ?').run(airtableTableId, id);
+}
+
 // Migration: add language column if it doesn't exist yet
 try { db.exec("ALTER TABLE models ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"); } catch (_) {}
+// Migration: add airtable_table_id column to models if it doesn't exist yet
+try { db.exec("ALTER TABLE models ADD COLUMN airtable_table_id TEXT"); } catch (_) {}
 
 // ─── Ideas ────────────────────────────────────────────────────────────────────
 
@@ -511,6 +517,7 @@ module.exports = {
   getLinkedModels,
   linkModelTelegram,
   setModelLanguage,
+  setModelAirtableTableId,
   deleteModel,
   deactivateModel,
   // Tickets
