@@ -652,7 +652,7 @@ function startTelegramBot(client) {
 
       const completed = db.completeIdea(ideaId);
       if (completed.airtable_record_id) {
-        markIdeaCompleted(completed.airtable_record_id, completed.model_id, completed.completed_at)
+        markIdeaCompleted(completed.airtable_record_id, completed.type, completed.completed_at)
           .catch(err => console.error('[Airtable] markIdeaCompleted error:', err.message));
       }
 

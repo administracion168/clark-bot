@@ -110,9 +110,8 @@ async function handleIdeasModal(interaction, type, modelId) {
     console.error('[Ideas] Failed to send Telegram message:', err.message);
   }
 
-  // 3. Create Airtable record in the model's own table (fire-and-forget)
+  // 3. Create Airtable record in the Reddit or Reels table (fire-and-forget)
   createIdeaRecord({
-    modelId  : model.id,
     modelName: model.name,
     type,
     link,

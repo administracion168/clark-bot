@@ -1,24 +1,28 @@
 /**
  * Airtable API integration for Clark Bot — Ideas tracking.
  *
- * Structure: one TABLE per model (named after the model).
- * Each table has: Red (Instagram Reels / Reddit), Link, Notas,
- *                 Estado (Pendiente / Completado), Fecha Creación, Fecha Completado.
+ * Structure: TWO fixed tables inside the base:
+ *   "Reddit"          → all Reddit ideas
+ *   "Instagram Reels" → all Reels ideas
  *
- * Table IDs are stored in the bot's DB (models.airtable_table_id) so they
- * survive restarts without hitting the Airtable Meta API again.
+ * Both tables have a "Modelo" field (the model's name from the DB).
+ * In Airtable you group the view by "Modelo" to get the collapsible
+ * sections shown in the screenshot.
+ *
+ * Table IDs are created once on first use and stored in the bot's
+ * DB config table so they survive restarts.
  *
  * Required env vars:
- *   AIRTABLE_API_KEY  — Personal Access Token with scopes:
- *                       data.records:read, data.records:write, schema:bases:write
+ *   AIRTABLE_API_KEY  — PAT with scopes:
+ *                       data.records:read  data.records:write  schema:bases:write
  *   AIRTABLE_BASE_ID  — e.g. appjUIc1QeMPsW8L8
  */
 
 const https = require('https');
 
-function apiKey()      { return process.env.AIRTABLE_API_KEY; }
-function baseId()      { return process.env.AIRTABLE_BASE_ID; }
-function isConfigured(){ return !!(apiKey() && baseId()); }
+function apiKey()       { return process.env.AIRTABLE_API_KEY; }
+function baseId()       { return process.env.AIRTABLE_BASE_ID; }
+function isConfigured() { return !!(apiKey() && baseId()); }
 
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
@@ -35,13 +39,10 @@ function airtableRequest(method, path, body) {
         ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
       },
     };
-
     const req = https.request(options, (res) => {
       let raw = '';
-      res.on('data', (chunk) => { raw += chunk; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(raw)); } catch { resolve(raw); }
-      });
+      res.on('data', c => { raw += c; });
+      res.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve(raw); } });
     });
     req.on('error', reject);
     if (data) req.write(data);
@@ -49,111 +50,102 @@ function airtableRequest(method, path, body) {
   });
 }
 
-// ── Table management ──────────────────────────────────────────────────────────
+// ── Table names ───────────────────────────────────────────────────────────────
+
+const TABLE_NAMES = {
+  reddit : 'Reddit',
+  reels  : 'Instagram Reels',
+};
+
+// ── Table creation ────────────────────────────────────────────────────────────
 
 /**
- * Create a new Airtable table named after the model.
- * Requires scope: schema:bases:write on the PAT.
- * Returns the new table ID (e.g. "tblXXXXXXXXXXXXXX").
+ * Create one of the two fixed network tables.
+ * Returns the new table ID.
  */
-async function createModelTable(modelName) {
-  const result = await airtableRequest(
-    'POST',
-    `/v0/meta/bases/${baseId()}/tables`,
-    {
-      name       : modelName,
-      description: `Ideas de contenido — ${modelName}`,
-      fields     : [
-        // Primary field — must be singleLineText (Airtable requirement)
-        { name: 'Idea', type: 'singleLineText' },
-        {
-          name   : 'Red',
-          type   : 'singleSelect',
-          options: {
-            choices: [
-              { name: 'Instagram Reels', color: 'pinkLight2'   },
-              { name: 'Reddit',          color: 'orangeLight2' },
-            ],
-          },
+async function createNetworkTable(type) {
+  const name = TABLE_NAMES[type];
+  const result = await airtableRequest('POST', `/v0/meta/bases/${baseId()}/tables`, {
+    name,
+    description: `Ideas de contenido — ${name}`,
+    fields: [
+      // Primary field must be singleLineText (Airtable rule)
+      { name: 'Modelo', type: 'singleLineText' },
+      { name: 'Link',   type: 'url'            },
+      { name: 'Notas',  type: 'multilineText'  },
+      {
+        name   : 'Estado',
+        type   : 'singleSelect',
+        options: {
+          choices: [
+            { name: 'Pendiente',  color: 'yellowLight2' },
+            { name: 'Completado', color: 'greenLight2'  },
+          ],
         },
-        { name: 'Link',  type: 'url'           },
-        { name: 'Notas', type: 'multilineText' },
-        {
-          name   : 'Estado',
-          type   : 'singleSelect',
-          options: {
-            choices: [
-              { name: 'Pendiente',  color: 'yellowLight2' },
-              { name: 'Completado', color: 'greenLight2'  },
-            ],
-          },
-        },
-        {
-          name   : 'Fecha Creación',
-          type   : 'date',
-          options: { dateFormat: { name: 'iso' } },
-        },
-        {
-          name   : 'Fecha Completado',
-          type   : 'date',
-          options: { dateFormat: { name: 'iso' } },
-        },
-      ],
-    },
-  );
+      },
+      {
+        name   : 'Fecha Creación',
+        type   : 'date',
+        options: { dateFormat: { name: 'iso' } },
+      },
+      {
+        name   : 'Fecha Completado',
+        type   : 'date',
+        options: { dateFormat: { name: 'iso' } },
+      },
+    ],
+  });
 
   if (result.id) {
-    console.log(`[Airtable] Created table "${modelName}": ${result.id}`);
+    console.log(`[Airtable] Created table "${name}": ${result.id}`);
     return result.id;
   }
-  throw new Error(`[Airtable] createModelTable failed: ${JSON.stringify(result)}`);
+  throw new Error(`[Airtable] createNetworkTable failed: ${JSON.stringify(result)}`);
 }
 
 /**
- * Return the Airtable table ID for this model.
- * Creates the table the first time and stores the ID in SQLite.
+ * Get the table ID for a type, creating it the first time.
+ * Stored in bot DB config: 'airtable_table_reddit' / 'airtable_table_reels'.
  */
-async function getOrCreateModelTableId(modelId, modelName) {
-  // Lazy-require to avoid circular dependency
-  const db = require('../database');
-  const model = db.getModel(modelId);
+async function getOrCreateNetworkTableId(type) {
+  const db       = require('../database');
+  const configKey = `airtable_table_${type}`;
 
-  if (model?.airtable_table_id) return model.airtable_table_id;
+  const stored = db.getConfig(configKey);
+  if (stored) return stored;
 
-  const tableId = await createModelTable(modelName);
-  db.setModelAirtableTableId(modelId, tableId);
+  const tableId = await createNetworkTable(type);
+  db.setConfig(configKey, tableId);
   return tableId;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Create a new idea record in the model's own Airtable table.
- * Returns the Airtable record ID string, or null on failure.
+ * Create a new idea record in the Reddit or Instagram Reels table.
  *
  * @param {object} opts
- * @param {number} opts.modelId    — bot DB model id
- * @param {string} opts.modelName  — model name (used as table name)
+ * @param {string} opts.modelName  — model name from DB (used as "Modelo" field)
  * @param {string} opts.type       — 'reddit' | 'reels'
  * @param {string} opts.link
  * @param {string} [opts.notes]
  * @param {string} opts.createdAt  — ISO datetime string
+ *
+ * @returns {string|null} Airtable record ID, or null on failure
  */
-async function createIdeaRecord({ modelId, modelName, type, link, notes, createdAt }) {
+async function createIdeaRecord({ modelName, type, link, notes, createdAt }) {
   if (!isConfigured()) {
     console.warn('[Airtable] Not configured — skipping record creation.');
     return null;
   }
 
   try {
-    const tableId  = await getOrCreateModelTableId(modelId, modelName);
-    const redLabel = type === 'reddit' ? 'Reddit' : 'Instagram Reels';
-    const dateStr  = (createdAt || new Date().toISOString()).split('T')[0];
+    const tableId = await getOrCreateNetworkTableId(type);
+    const dateStr = (createdAt || new Date().toISOString()).split('T')[0];
 
     const result = await airtableRequest('POST', `/v0/${baseId()}/${tableId}`, {
       fields: {
-        Idea             : `${redLabel} — ${dateStr}`,
-        Red              : redLabel,
+        Modelo           : modelName,
         Link             : link,
         Notas            : notes || '',
         Estado           : 'Pendiente',
@@ -162,7 +154,7 @@ async function createIdeaRecord({ modelId, modelName, type, link, notes, created
     });
 
     if (result.id) {
-      console.log(`[Airtable] Record created in "${modelName}": ${result.id}`);
+      console.log(`[Airtable] Record created in "${TABLE_NAMES[type]}" for ${modelName}: ${result.id}`);
       return result.id;
     }
     console.error('[Airtable] Unexpected response:', result);
@@ -174,36 +166,31 @@ async function createIdeaRecord({ modelId, modelName, type, link, notes, created
 }
 
 /**
- * Mark an existing Airtable record as completed.
+ * Mark an idea record as completed.
  *
- * @param {string} airtableRecordId  — the record's Airtable ID
- * @param {number} modelId           — bot DB model id (to find the right table)
- * @param {string} completedAt       — ISO datetime string
+ * @param {string} airtableRecordId
+ * @param {string} type        — 'reddit' | 'reels' (to find the right table)
+ * @param {string} completedAt — ISO datetime string
  */
-async function markIdeaCompleted(airtableRecordId, modelId, completedAt) {
+async function markIdeaCompleted(airtableRecordId, type, completedAt) {
   if (!isConfigured() || !airtableRecordId) return;
 
   try {
-    const db = require('../database');
-    const model = db.getModel(modelId);
+    const db      = require('../database');
+    const tableId = db.getConfig(`airtable_table_${type}`);
 
-    if (!model?.airtable_table_id) {
-      console.warn(`[Airtable] No table ID for model ${modelId} — skipping markCompleted.`);
+    if (!tableId) {
+      console.warn(`[Airtable] No table for type "${type}" — cannot mark completed.`);
       return;
     }
 
     const dateStr = (completedAt || new Date().toISOString()).split('T')[0];
-
-    await airtableRequest(
-      'PATCH',
-      `/v0/${baseId()}/${model.airtable_table_id}/${airtableRecordId}`,
-      {
-        fields: {
-          Estado            : 'Completado',
-          'Fecha Completado': dateStr,
-        },
+    await airtableRequest('PATCH', `/v0/${baseId()}/${tableId}/${airtableRecordId}`, {
+      fields: {
+        Estado            : 'Completado',
+        'Fecha Completado': dateStr,
       },
-    );
+    });
     console.log(`[Airtable] Marked completed: ${airtableRecordId}`);
   } catch (err) {
     console.error('[Airtable] markIdeaCompleted error:', err.message);
