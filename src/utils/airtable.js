@@ -64,6 +64,8 @@ async function createModelTable(modelName) {
       name       : modelName,
       description: `Ideas de contenido — ${modelName}`,
       fields     : [
+        // Primary field — must be singleLineText (Airtable requirement)
+        { name: 'Idea', type: 'singleLineText' },
         {
           name   : 'Red',
           type   : 'singleSelect',
@@ -150,6 +152,7 @@ async function createIdeaRecord({ modelId, modelName, type, link, notes, created
 
     const result = await airtableRequest('POST', `/v0/${baseId()}/${tableId}`, {
       fields: {
+        Idea             : `${redLabel} — ${dateStr}`,
         Red              : redLabel,
         Link             : link,
         Notas            : notes || '',
