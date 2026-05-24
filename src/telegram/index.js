@@ -389,7 +389,9 @@ async function buildSocialsStat(model, statKey) {
   const isEs    = lang === 'es';
   const backBtn = [{ text: isEs ? '← Volver a Redes' : '← Back to Socials', callback_data: 'socials_menu' }];
 
-  const stats = await getModelInstagramStats(model.name);
+  // Use manually mapped Airtable name if set, otherwise fall back to model name
+  const igName = model.airtable_ig_name || model.name;
+  const stats  = await getModelInstagramStats(igName);
 
   if (!stats) {
     return {

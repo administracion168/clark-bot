@@ -333,10 +333,16 @@ function setModelAirtableTableId(id, airtableTableId) {
   db.prepare('UPDATE models SET airtable_table_id = ? WHERE id = ?').run(airtableTableId, id);
 }
 
+function setModelAirtableIgName(id, igName) {
+  db.prepare('UPDATE models SET airtable_ig_name = ? WHERE id = ?').run(igName, id);
+}
+
 // Migration: add language column if it doesn't exist yet
 try { db.exec("ALTER TABLE models ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"); } catch (_) {}
 // Migration: add airtable_table_id column to models if it doesn't exist yet
 try { db.exec("ALTER TABLE models ADD COLUMN airtable_table_id TEXT"); } catch (_) {}
+// Migration: add airtable_ig_name column to models (manual Airtable name mapping)
+try { db.exec("ALTER TABLE models ADD COLUMN airtable_ig_name TEXT"); } catch (_) {}
 
 // ─── Ideas ────────────────────────────────────────────────────────────────────
 
@@ -518,6 +524,7 @@ module.exports = {
   linkModelTelegram,
   setModelLanguage,
   setModelAirtableTableId,
+  setModelAirtableIgName,
   deleteModel,
   deactivateModel,
   // Tickets
