@@ -197,4 +197,75 @@ async function markIdeaCompleted(airtableRecordId, type, completedAt) {
   }
 }
 
-module.exports = { createIdeaRecord, markIdeaCompleted };
+// ── Instagram Stats ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch aggregated Instagram stats for a model from the Instagram Tracker base.
+ *
+ * Required env vars:
+ *   AIRTABLE_INSTAGRAM_BASE_ID  — e.g. appfsYM0qv2L4Apkn
+ *   AIRTABLE_INSTAGRAM_TABLE_ID — e.g. tblKUrrcvDv5cmamf
+ *
+ * @param {string} modelName — must match the "Model" field in Airtable (case-insensitive)
+ * @returns {{ totalFollowers, totalViews, delta24h, delta7d, usernames, accountCount } | null}
+ */
+async function getModelInstagramStats(modelName) {
+  const igBase  = process.env.AIRTABLE_INSTAGRAM_BASE_ID;
+  const igTable = process.env.AIRTABLE_INSTAGRAM_TABLE_ID;
+
+  if (!apiKey() || !igBase || !igTable) {
+    console.warn('[Airtable] Instagram env vars not configured — skipping stats.');
+    return null;
+  }
+
+  // Case-insensitive filter on the Model field
+  const formula      = encodeURIComponent(`LOWER({Model})=LOWER("${modelName}")`);
+  const wantedFields = ['Username', 'Followers', 'Views Current', 'Delta 24h', 'Delta 7d'];
+  const fieldParams  = wantedFields.map(f => `fields[]=${encodeURIComponent(f)}`).join('&');
+  const basePath     = `/v0/${igBase}/${igTable}?${fieldParams}&filterByFormula=${formula}&pageSize=100`;
+
+  try {
+    let allRecords = [];
+    let offset     = null;
+
+    do {
+      const path   = offset ? `${basePath}&offset=${encodeURIComponent(offset)}` : basePath;
+      const result = await airtableRequest('GET', path, null);
+
+      if (!Array.isArray(result.records)) {
+        console.error('[Airtable] getModelInstagramStats unexpected response:', JSON.stringify(result).slice(0, 200));
+        return null;
+      }
+
+      allRecords = allRecords.concat(result.records);
+      offset     = result.offset ?? null;
+    } while (offset);
+
+    if (!allRecords.length) return null;
+
+    const num = (r, field) => {
+      const v = r.fields[field];
+      return (typeof v === 'number') ? v : (parseFloat(v) || 0);
+    };
+
+    const totalFollowers = allRecords.reduce((s, r) => s + num(r, 'Followers'),     0);
+    const totalViews     = allRecords.reduce((s, r) => s + num(r, 'Views Current'), 0);
+    const delta24h       = allRecords.reduce((s, r) => s + num(r, 'Delta 24h'),     0);
+    const delta7d        = allRecords.reduce((s, r) => s + num(r, 'Delta 7d'),      0);
+    const usernames      = allRecords.map(r => r.fields['Username']).filter(Boolean);
+
+    return {
+      totalFollowers : Math.round(totalFollowers),
+      totalViews     : Math.round(totalViews),
+      delta24h       : Math.round(delta24h),
+      delta7d        : Math.round(delta7d),
+      usernames,
+      accountCount   : allRecords.length,
+    };
+  } catch (err) {
+    console.error('[Airtable] getModelInstagramStats error:', err.message);
+    return null;
+  }
+}
+
+module.exports = { createIdeaRecord, markIdeaCompleted, getModelInstagramStats };

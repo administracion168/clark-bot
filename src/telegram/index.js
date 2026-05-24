@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const db = require('../database');
 const { translate } = require('../utils/translate');
-const { markIdeaCompleted } = require('../utils/airtable');
+const { markIdeaCompleted, getModelInstagramStats } = require('../utils/airtable');
 const { generatePendingIdeasPdf } = require('../utils/pdfGenerator');
 
 let bot          = null;
@@ -16,16 +16,16 @@ const lastDashboard  = new Map(); // chatId → messageId  (the card we edit in-
 // ── Menu labels (persistent keyboard) ────────────────────────────────────────
 
 const MENU = {
-  en: { customs: '📋 My Customs', reels: '🎬 Reels Ideas', reddit: '💡 Reddit Ideas', lang: '🌐 Language' },
-  es: { customs: '📋 Mis Customs', reels: '🎬 Ideas Reels', reddit: '💡 Ideas Reddit', lang: '🌐 Idioma'   },
+  en: { customs: '📋 My Customs', reels: '🎬 Reels Ideas', reddit: '💡 Reddit Ideas', socials: '📱 Socials', lang: '🌐 Language' },
+  es: { customs: '📋 Mis Customs', reels: '🎬 Ideas Reels', reddit: '💡 Ideas Reddit', socials: '📱 Redes',   lang: '🌐 Idioma'  },
 };
 
 function mainMenuKeyboard(lang) {
   const m = MENU[lang] ?? MENU.en;
   return {
     keyboard: [
-      [{ text: m.customs }, { text: m.reels   }],
-      [{ text: m.reddit  }, { text: m.lang    }],
+      [{ text: m.customs }, { text: m.reels   }, { text: m.reddit  }],
+      [{ text: m.socials }, { text: m.lang    }],
     ],
     resize_keyboard : true,
     is_persistent   : true,
@@ -359,6 +359,96 @@ function buildIdeasDashboard(model, type) {
   ];
 
   return { html, rows };
+}
+
+// ── Socials: sub-menu ─────────────────────────────────────────────────────────
+
+function buildSocialsMenu(model) {
+  const lang = model.language || 'en';
+  const isEs = lang === 'es';
+
+  const html = isEs
+    ? '📱 <b>Redes Sociales</b>\n\n¿Qué quieres ver?'
+    : '📱 <b>Social Stats</b>\n\nWhat would you like to see?';
+
+  const rows = [
+    [{ text: isEs ? '👥 Seguidores totales'    : '👥 Total Followers',   callback_data: 'socials_followers' }],
+    [{ text: isEs ? '👁️ Views totales'         : '👁️ Total Views',       callback_data: 'socials_views'     }],
+    [{ text: isEs ? '📈 Views últimas 24h'     : '📈 Views last 24h',    callback_data: 'socials_delta24h'  }],
+    [{ text: isEs ? '📊 Views últimos 7 días'  : '📊 Views last 7 days', callback_data: 'socials_delta7d'   }],
+    [{ text: isEs ? '📱 Mis cuentas'           : '📱 My accounts',       callback_data: 'socials_accounts'  }],
+  ];
+
+  return { html, rows };
+}
+
+// ── Socials: individual stat view (async — fetches Airtable) ──────────────────
+
+async function buildSocialsStat(model, statKey) {
+  const lang    = model.language || 'en';
+  const isEs    = lang === 'es';
+  const backBtn = [{ text: isEs ? '← Volver a Redes' : '← Back to Socials', callback_data: 'socials_menu' }];
+
+  const stats = await getModelInstagramStats(model.name);
+
+  if (!stats) {
+    return {
+      html: isEs
+        ? '❌ No se pudo obtener la información de Instagram.\nIntenta de nuevo en unos minutos.'
+        : '❌ Could not retrieve Instagram data.\nPlease try again in a few minutes.',
+      rows: [backBtn],
+    };
+  }
+
+  if (!stats.accountCount) {
+    return {
+      html: isEs
+        ? '❌ No se encontraron cuentas asociadas a este perfil.'
+        : '❌ No accounts found for this profile.',
+      rows: [backBtn],
+    };
+  }
+
+  const fmt  = (n) => Number(n).toLocaleString('en');
+  const sign = (n) => (n >= 0 ? '+' : '') + fmt(n);
+  let html;
+
+  if (statKey === 'followers') {
+    html = isEs
+      ? `👥 <b>Seguidores Totales</b>\n\n<b>${fmt(stats.totalFollowers)}</b> seguidores\n\n<i>${stats.accountCount} cuenta(s) activa(s)</i>`
+      : `👥 <b>Total Followers</b>\n\n<b>${fmt(stats.totalFollowers)}</b> followers\n\n<i>${stats.accountCount} active account(s)</i>`;
+
+  } else if (statKey === 'views') {
+    html = isEs
+      ? `👁️ <b>Views Totales</b>\n\n<b>${fmt(stats.totalViews)}</b> views\n\n<i>${stats.accountCount} cuenta(s) activa(s)</i>`
+      : `👁️ <b>Total Views</b>\n\n<b>${fmt(stats.totalViews)}</b> views\n\n<i>${stats.accountCount} active account(s)</i>`;
+
+  } else if (statKey === 'delta24h') {
+    html = isEs
+      ? `📈 <b>Views — Últimas 24h</b>\n\n<b>${sign(stats.delta24h)}</b> views\n\n<i>Variación respecto a hace 24 horas</i>`
+      : `📈 <b>Views — Last 24h</b>\n\n<b>${sign(stats.delta24h)}</b> views\n\n<i>Change vs. 24 hours ago</i>`;
+
+  } else if (statKey === 'delta7d') {
+    html = isEs
+      ? `📊 <b>Views — Últimos 7 días</b>\n\n<b>${sign(stats.delta7d)}</b> views\n\n<i>Variación respecto a hace 7 días</i>`
+      : `📊 <b>Views — Last 7 days</b>\n\n<b>${sign(stats.delta7d)}</b> views\n\n<i>Change vs. 7 days ago</i>`;
+
+  } else if (statKey === 'accounts') {
+    const MAX_SHOWN = 25;
+    const shown     = stats.usernames.slice(0, MAX_SHOWN).map(u => `• @${u}`).join('\n');
+    const extra     = stats.usernames.length - MAX_SHOWN;
+    const extraLine = extra > 0
+      ? (isEs ? `\n\n<i>...y ${extra} más</i>` : `\n\n<i>...and ${extra} more</i>`)
+      : '';
+    html = isEs
+      ? `📱 <b>Mis Cuentas</b> (${stats.accountCount})\n\n${shown}${extraLine}`
+      : `📱 <b>My Accounts</b> (${stats.accountCount})\n\n${shown}${extraLine}`;
+
+  } else {
+    html = isEs ? '❓ Estadística desconocida.' : '❓ Unknown stat.';
+  }
+
+  return { html, rows: [backBtn] };
 }
 
 function buildLanguageDashboard(lang) {
@@ -737,6 +827,20 @@ function startTelegramBot(client) {
       return;
     }
 
+    // ── Socials menu ────────────────────────────────────────────────────
+    if (data === 'socials_menu') {
+      if (!model) return;
+      const dash = buildSocialsMenu(model);
+      return updateDashboard(chatId, lang, dash.html, dash.rows);
+    }
+
+    if (data.startsWith('socials_')) {
+      if (!model) return;
+      const statKey = data.replace('socials_', '');
+      const dash    = await buildSocialsStat(model, statKey);
+      return updateDashboard(chatId, lang, dash.html, dash.rows);
+    }
+
     // ── No-op (informational button) ───────────────────────────────────
     if (data === 'noop') return;
 
@@ -843,6 +947,10 @@ function startTelegramBot(client) {
       }
       if (text === m.reddit) {
         const dash = buildIdeasDashboard(model, 'reddit');
+        return updateDashboard(chatId, lang, dash.html, dash.rows);
+      }
+      if (text === m.socials) {
+        const dash = buildSocialsMenu(model);
         return updateDashboard(chatId, lang, dash.html, dash.rows);
       }
       if (text === m.lang) {
