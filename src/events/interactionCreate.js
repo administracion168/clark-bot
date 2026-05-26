@@ -34,11 +34,12 @@ module.exports = {
       return;
     }
 
-    // ── GetNumber buttons (ig_get_number_btn / num_svc1 / num_svc2 / num_use_ / num_cancel_) ──────
+    // ── GetNumber buttons (ig_get_number_btn / num_svc1 / num_svc2 / num_svc3 / num_use_ / num_cancel_) ──────
     if (
       customId === 'ig_get_number_btn' ||
       customId === 'num_svc1' ||
       customId === 'num_svc2' ||
+      customId === 'num_svc3' ||
       customId.startsWith('num_use_') ||
       customId.startsWith('num_cancel_')
     ) {

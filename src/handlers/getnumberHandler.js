@@ -48,6 +48,11 @@ async function handleGetNumberInteraction(interaction) {
     return executeGetNumber(interaction, '5sim', true);
   }
 
+  // ── Servicio 3 — SMSPool ──────────────────────────────────────────────────
+  if (customId === 'num_svc3') {
+    return executeGetNumber(interaction, 'smspool', true);
+  }
+
   // ── ✅ Used — Complete ────────────────────────────────────────────────────
   if (customId.startsWith('num_use_')) {
     const activationId = customId.slice('num_use_'.length);

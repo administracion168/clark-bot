@@ -61,6 +61,60 @@ async function grizzlyCancel(activationId) {
   await grizzlyRequest({ action: 'setStatus', id: activationId, status: '-1' });
 }
 
+// ── SMSPool API helpers ───────────────────────────────────────────────────────
+
+const SMSPOOL_BASE = 'https://api.smspool.net';
+
+async function smsPoolRequest(endpoint, params = {}) {
+  const apiKey = process.env.SMSPOOL_API_KEY;
+  if (!apiKey) throw new Error('SMSPOOL_API_KEY is not set in environment variables.');
+
+  const url = new URL(`${SMSPOOL_BASE}/${endpoint}`);
+  url.searchParams.set('key', apiKey);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+
+  const res = await fetch(url.toString(), {
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    console.error('[GetNumber/SMSPool] HTTP error:', res.status, text.slice(0, 200));
+    throw new Error('SERVICE_UNAVAILABLE');
+  }
+
+  return res.json();
+}
+
+async function smsPoolGetNumber() {
+  const data = await smsPoolRequest('purchase/sms', { country: 1, service: 457 });
+  if (!data.success || !data.number || !data.order_id) {
+    const msg = data.message || 'NO_NUMBERS';
+    console.error('[GetNumber/SMSPool] Unexpected buy response:', JSON.stringify(data).slice(0, 200));
+    throw new Error(msg.toUpperCase().replace(/ /g, '_').slice(0, 40));
+  }
+  return { activationId: String(data.order_id), phoneNumber: data.number };
+}
+
+async function smsPoolCheckStatus(activationId) {
+  const data = await smsPoolRequest('sms/check', { orderid: activationId });
+  // sms field is "0" when no code yet, actual code string when received
+  if (data.sms && data.sms !== '0') {
+    return { status: 'OK', code: data.sms };
+  }
+  // status 6 = refunded/cancelled
+  if (data.status === 6) return { status: 'CANCEL' };
+  return { status: 'WAIT' };
+}
+
+async function smsPoolComplete(activationId) {
+  await smsPoolRequest('sms/archive', { orderid: activationId });
+}
+
+async function smsPoolCancel(activationId) {
+  await smsPoolRequest('sms/cancel', { orderid: activationId });
+}
+
 // ── 5sim API helpers ──────────────────────────────────────────────────────────
 
 const FIVESIM_BASE = 'https://5sim.net/v1/user';
@@ -115,19 +169,27 @@ async function fiveSimCancel(activationId) {
 // ── Unified service abstraction ───────────────────────────────────────────────
 
 async function fetchNumber(service) {
-  return service === '5sim' ? fiveSimGetNumber() : grizzlyGetNumber();
+  if (service === '5sim')    return fiveSimGetNumber();
+  if (service === 'smspool') return smsPoolGetNumber();
+  return grizzlyGetNumber();
 }
 
 async function pollStatus(service, activationId) {
-  return service === '5sim' ? fiveSimCheckStatus(activationId) : grizzlyCheckStatus(activationId);
+  if (service === '5sim')    return fiveSimCheckStatus(activationId);
+  if (service === 'smspool') return smsPoolCheckStatus(activationId);
+  return grizzlyCheckStatus(activationId);
 }
 
 async function completeActivation(service, activationId) {
-  return service === '5sim' ? fiveSimComplete(activationId) : grizzlyComplete(activationId);
+  if (service === '5sim')    return fiveSimComplete(activationId);
+  if (service === 'smspool') return smsPoolComplete(activationId);
+  return grizzlyComplete(activationId);
 }
 
 async function cancelActivation(service, activationId) {
-  return service === '5sim' ? fiveSimCancel(activationId) : grizzlyCancel(activationId);
+  if (service === '5sim')    return fiveSimCancel(activationId);
+  if (service === 'smspool') return smsPoolCancel(activationId);
+  return grizzlyCancel(activationId);
 }
 
 // ── Admin log helper ──────────────────────────────────────────────────────────
@@ -155,6 +217,10 @@ async function showServiceSelector(interaction) {
       .setCustomId('num_svc2')
       .setLabel('Service 2')
       .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('num_svc3')
+      .setLabel('Service 3')
+      .setStyle(ButtonStyle.Success),
   );
   return interaction.reply({
     content: '📱 Select the service to get your number:',
