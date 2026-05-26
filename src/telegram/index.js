@@ -344,16 +344,17 @@ function buildIdeasDashboard(model, type) {
     };
   }
 
-  const lines = ideas.map((idea, i) => {
+  const lines = ideas.map((idea) => {
+    const num  = idea.model_idea_number ?? '?';
     const note = idea.notes ? ` — <i>${idea.notes.slice(0, 50)}${idea.notes.length > 50 ? '…' : ''}</i>` : '';
-    return `${i + 1}. 🔗 ${idea.link}${note}`;
+    return `#${num} 🔗 ${idea.link}${note}`;
   });
 
   const html = `${info.emoji} <b>${label}</b> (${ideas.length})\n\n` + lines.join('\n');
 
   const rows = [
-    ...ideas.map((idea, i) => [
-      { text: `✅ #${i + 1} ${isEs ? 'Completada' : 'Done'}`, callback_data: `idea_complete_${idea.id}` },
+    ...ideas.map((idea) => [
+      { text: `✅ #${idea.model_idea_number ?? '?'} ${isEs ? 'Completada' : 'Done'}`, callback_data: `idea_complete_${idea.id}` },
     ]),
     [{ text: isEs ? '📄 Descargar PDF' : '📄 Download PDF', callback_data: `ideas_pdf_${type}` }],
   ];
@@ -539,14 +540,15 @@ async function sendIdeaToModel(idea, model) {
   if (!bot || !model.telegram_chat_id) return null;
 
   const info = { reddit: { emoji: '💡', label: 'Reddit' }, reels: { emoji: '🎬', label: 'Instagram Reels' } }[idea.type] ?? { emoji: '📋', label: idea.type };
-  const notes = idea.notes ? `\n\n📝 <b>Notas:</b>\n${idea.notes}` : '';
+  const notes  = idea.notes ? `\n\n📝 <b>Notas:</b>\n${idea.notes}` : '';
+  const numTag = idea.model_idea_number ? ` <b>#${idea.model_idea_number}</b>` : '';
 
-  const html = `${info.emoji} <b>Nueva Idea — ${info.label}</b>\n\n🔗 <b>Link:</b> ${idea.link}${notes}`;
+  const html = `${info.emoji} <b>Nueva Idea${numTag} — ${info.label}</b>\n\n🔗 <b>Link:</b> ${idea.link}${notes}`;
 
   try {
     const msg = await bot.sendMessage(model.telegram_chat_id, html, {
       parse_mode  : 'HTML',
-      reply_markup: { inline_keyboard: [[{ text: '✅ Marcar como completada', callback_data: `idea_complete_${idea.id}` }]] },
+      reply_markup: { inline_keyboard: [[{ text: `✅ #${idea.model_idea_number ?? '?'} Marcar como completada`, callback_data: `idea_complete_${idea.id}` }]] },
       disable_web_page_preview: true,
     });
     return msg.message_id;

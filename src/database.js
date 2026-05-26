@@ -344,6 +344,25 @@ try { db.exec("ALTER TABLE models ADD COLUMN airtable_table_id TEXT"); } catch (
 // Migration: add airtable_ig_name column to models (manual Airtable name mapping)
 try { db.exec("ALTER TABLE models ADD COLUMN airtable_ig_name TEXT"); } catch (_) {}
 
+// Migration: add model_idea_number column to ideas (static per-model counter)
+try { db.exec("ALTER TABLE ideas ADD COLUMN model_idea_number INTEGER"); } catch (_) {}
+// Backfill: assign sequential numbers per model for existing ideas that have none
+;(function backfillIdeaNumbers() {
+  const models = db.prepare('SELECT id FROM models').all();
+  for (const m of models) {
+    const ideas = db.prepare(
+      "SELECT id FROM ideas WHERE model_id = ? AND model_idea_number IS NULL ORDER BY created_at ASC, id ASC"
+    ).all(m.id);
+    if (!ideas.length) continue;
+    const maxRow = db.prepare(
+      "SELECT MAX(model_idea_number) as mx FROM ideas WHERE model_id = ? AND model_idea_number IS NOT NULL"
+    ).get(m.id);
+    let next = (maxRow.mx ?? 0) + 1;
+    const update = db.prepare('UPDATE ideas SET model_idea_number = ? WHERE id = ?');
+    for (const idea of ideas) { update.run(next++, idea.id); }
+  }
+})();
+
 // ─── Ideas ────────────────────────────────────────────────────────────────────
 
 db.exec(`
@@ -362,11 +381,15 @@ db.exec(`
 `);
 
 function createIdea({ modelId, type, link, notes }) {
-  const now = new Date().toISOString();
+  const now    = new Date().toISOString();
+  const maxRow = db.prepare(
+    'SELECT MAX(model_idea_number) as mx FROM ideas WHERE model_id = ?'
+  ).get(modelId);
+  const ideaNum = (maxRow.mx ?? 0) + 1;
   const info = db.prepare(`
-    INSERT INTO ideas (model_id, type, link, notes, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(modelId, type, link, notes || null, now);
+    INSERT INTO ideas (model_id, type, link, notes, created_at, model_idea_number)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(modelId, type, link, notes || null, now, ideaNum);
   return db.prepare('SELECT * FROM ideas WHERE id = ?').get(info.lastInsertRowid);
 }
 
