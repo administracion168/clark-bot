@@ -32,11 +32,11 @@ module.exports = {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('translate_en_es')
-        .setLabel('🇺🇸 → 🇪🇸  Inglés a Español')
+        .setLabel('🇺🇸 → 🇪🇸  English to Spanish')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('translate_es_en')
-        .setLabel('🇪🇸 → 🇺🇸  Español a Inglés')
+        .setLabel('🇪🇸 → 🇺🇸  Spanish to English')
         .setStyle(ButtonStyle.Secondary),
     );
 
