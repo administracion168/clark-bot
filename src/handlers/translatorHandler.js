@@ -6,9 +6,9 @@ const {
 } = require('discord.js');
 
 // ── Grok config ───────────────────────────────────────────────────────────────
-// grok-4.0-reasoning: reasoning model — requires temperature=1 and reasoning_effort.
-// Do NOT use temperature < 1 with reasoning models or content may come back empty.
-const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
+// Uses xAI's /v1/responses endpoint (shown in their dashboard example).
+// grok-4.0-reasoning requires reasoning effort param, not temperature.
+const GROK_API_URL = 'https://api.x.ai/v1/responses';
 const GROK_MODEL   = 'grok-4.0-reasoning';
 
 // ── System prompts ────────────────────────────────────────────────────────────
@@ -165,14 +165,10 @@ async function callGrok(systemPrompt, userText) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model:            GROK_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userText },
-      ],
-      temperature:      1,     // Reasoning models require temperature=1
-      reasoning_effort: 'low', // Low effort: faster + cheaper for simple translations
-      max_tokens:       1024,
+      model:        GROK_MODEL,
+      instructions: systemPrompt,  // /v1/responses uses "instructions" for system prompt
+      input:        userText,       // /v1/responses uses "input" for user text
+      reasoning:    { effort: 'low' }, // low effort: faster + cheaper for translations
     }),
   });
 
@@ -183,22 +179,18 @@ async function callGrok(systemPrompt, userText) {
   }
 
   const data = await res.json();
-  console.log('[Translator/Grok] Raw response:', JSON.stringify(data).slice(0, 600));
+  console.log('[Translator/Grok] Raw response:', JSON.stringify(data).slice(0, 800));
 
-  // Standard content field
-  const translation = data.choices?.[0]?.message?.content?.trim();
+  // /v1/responses format: output[] → find type=message → content[] → type=output_text
+  const messageBlock = data.output?.find((o) => o.type === 'message');
+  const translation  = messageBlock?.content?.find((c) => c.type === 'output_text')?.text?.trim();
 
-  // Fallback: some reasoning models put the answer in reasoning_content
-  const fallback = data.choices?.[0]?.message?.reasoning_content?.trim();
-
-  const result = translation || fallback;
-
-  if (!result) {
-    console.error('[Translator/Grok] No content in response. Full data:', JSON.stringify(data));
+  if (!translation) {
+    console.error('[Translator/Grok] No content in response. Full:', JSON.stringify(data));
     throw new Error('EMPTY_RESPONSE');
   }
 
-  return result;
+  return translation;
 }
 
 // ── Interaction handler ───────────────────────────────────────────────────────
