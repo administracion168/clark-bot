@@ -6,10 +6,10 @@ const {
 } = require('discord.js');
 
 // ── Grok config ───────────────────────────────────────────────────────────────
-// Uses xAI's /v1/responses endpoint (shown in their dashboard example).
-// grok-4.0-reasoning requires reasoning effort param, not temperature.
-const GROK_API_URL = 'https://api.x.ai/v1/responses';
-const GROK_MODEL   = 'grok-4.0-reasoning';
+// /v1/chat/completions is the stable OpenAI-compatible endpoint.
+// grok-3: xAI flagship non-reasoning model — works with temperature param.
+const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
+const GROK_MODEL   = 'grok-3';
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
@@ -165,10 +165,13 @@ async function callGrok(systemPrompt, userText) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model:        GROK_MODEL,
-      instructions: systemPrompt,  // /v1/responses uses "instructions" for system prompt
-      input:        userText,       // /v1/responses uses "input" for user text
-      reasoning:    { effort: 'low' }, // low effort: faster + cheaper for translations
+      model:       GROK_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userText },
+      ],
+      temperature: 0.3,
+      max_tokens:  1024,
     }),
   });
 
@@ -181,9 +184,8 @@ async function callGrok(systemPrompt, userText) {
   const data = await res.json();
   console.log('[Translator/Grok] Raw response:', JSON.stringify(data).slice(0, 800));
 
-  // /v1/responses format: output[] → find type=message → content[] → type=output_text
-  const messageBlock = data.output?.find((o) => o.type === 'message');
-  const translation  = messageBlock?.content?.find((c) => c.type === 'output_text')?.text?.trim();
+  // /v1/chat/completions format: standard OpenAI-compatible response
+  const translation = data.choices?.[0]?.message?.content?.trim();
 
   if (!translation) {
     console.error('[Translator/Grok] No content in response. Full:', JSON.stringify(data));
