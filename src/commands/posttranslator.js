@@ -25,18 +25,18 @@ module.exports = {
       .setDescription(
         'Translate your message with AI.\n\n' +
         '🇺🇸 **English → Spanish** — Translate from English to Spanish\n' +
-        '🇨🇴 **Spanish → English** — Translate from Spanish to English\n\n' +
+        '🇪🇸 **Spanish → English** — Translate from Spanish to English\n\n' +
         '*Your translation will only be visible to you.*',
       );
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('translate_en_es')
-        .setLabel('🇺🇸 → 🇨🇴  Inglés a Español')
+        .setLabel('🇺🇸 → 🇪🇸  Inglés a Español')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('translate_es_en')
-        .setLabel('🇨🇴 → 🇺🇸  Español a Inglés')
+        .setLabel('🇪🇸 → 🇺🇸  Español a Inglés')
         .setStyle(ButtonStyle.Secondary),
     );
 

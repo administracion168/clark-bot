@@ -6,9 +6,11 @@ const {
 } = require('discord.js');
 
 // ── Grok config ───────────────────────────────────────────────────────────────
-// Check available models at: https://docs.x.ai/docs/models
+// grok-2-1212: stable non-reasoning model, standard OpenAI-compatible responses.
+// grok-3-mini is a reasoning model and may return content in reasoning_content
+// instead of content when temperature != 1, causing empty translations.
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
-const GROK_MODEL   = 'grok-3-mini';
+const GROK_MODEL   = 'grok-2-1212';
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
@@ -176,19 +178,27 @@ async function callGrok(systemPrompt, userText) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    console.error('[Translator/Grok] HTTP error:', res.status, text.slice(0, 300));
+    console.error('[Translator/Grok] HTTP error:', res.status, text.slice(0, 500));
     throw new Error('GROK_API_ERROR');
   }
 
   const data = await res.json();
+  console.log('[Translator/Grok] Raw response:', JSON.stringify(data).slice(0, 600));
+
+  // Standard content field
   const translation = data.choices?.[0]?.message?.content?.trim();
 
-  if (!translation) {
-    console.error('[Translator/Grok] Empty response:', JSON.stringify(data).slice(0, 300));
+  // Fallback: some reasoning models put the answer in reasoning_content
+  const fallback = data.choices?.[0]?.message?.reasoning_content?.trim();
+
+  const result = translation || fallback;
+
+  if (!result) {
+    console.error('[Translator/Grok] No content in response. Full data:', JSON.stringify(data));
     throw new Error('EMPTY_RESPONSE');
   }
 
-  return translation;
+  return result;
 }
 
 // ── Interaction handler ───────────────────────────────────────────────────────
@@ -202,7 +212,7 @@ async function handleTranslatorInteraction(interaction) {
 
     const modal = new ModalBuilder()
       .setCustomId(isEnEs ? 'translate_modal_en_es' : 'translate_modal_es_en')
-      .setTitle(isEnEs ? '🇺🇸 → 🇨🇴  Inglés a Español' : '🇨🇴 → 🇺🇸  Español a Inglés');
+      .setTitle(isEnEs ? '🇺🇸 → 🇪🇸  Inglés a Español' : '🇪🇸 → 🇺🇸  Español a Inglés');
 
     const textInput = new TextInputBuilder()
       .setCustomId('translate_input')
@@ -227,7 +237,7 @@ async function handleTranslatorInteraction(interaction) {
     const inputText  = interaction.fields.getTextInputValue('translate_input').trim();
     const isEnEs     = customId === 'translate_modal_en_es';
     const systemPrompt   = isEnEs ? PROMPT_EN_ES : PROMPT_ES_EN;
-    const directionLabel = isEnEs ? '🇺🇸 → 🇨🇴' : '🇨🇴 → 🇺🇸';
+    const directionLabel = isEnEs ? '🇺🇸 → 🇪🇸' : '🇪🇸 → 🇺🇸';
 
     let translation;
     try {
