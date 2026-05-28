@@ -244,9 +244,14 @@ async function handleTranslatorInteraction(interaction) {
       translation = await callGrok(systemPrompt, inputText);
     } catch (err) {
       console.error('[Translator] Error:', err.message);
-      const msg = err.message === 'GROK_API_ERROR'
-        ? '❌ Translation service is temporarily unavailable. Try again in a moment.'
-        : '❌ Received an empty translation. Please try again.';
+      let msg;
+      if (err.message.includes('GROK_API_KEY is not set')) {
+        msg = '❌ Translator not configured. Contact an admin (missing API key).';
+      } else if (err.message === 'GROK_API_ERROR') {
+        msg = '❌ Translation service is temporarily unavailable. Try again in a moment.';
+      } else {
+        msg = '❌ Translation failed. Please try again.';
+      }
       return interaction.editReply({ content: msg });
     }
 
