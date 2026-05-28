@@ -995,4 +995,21 @@ function startTelegramBot(client) {
   return bot;
 }
 
-module.exports = { startTelegramBot, sendRequestToModel, forwardToModel, notifyModelCancelledByChatter, sendIdeaToModel };
+// ── Model announcement ────────────────────────────────────────────────────────
+
+async function sendAnnouncementToModel(chatId, text) {
+  if (!bot || !chatId) return false;
+  try {
+    await bot.sendMessage(
+      chatId,
+      `📢 <b>ANUNCIO</b>\n\n${text}`,
+      { parse_mode: 'HTML' },
+    );
+    return true;
+  } catch (err) {
+    console.error('[Telegram] Failed to send announcement:', err.message);
+    return false;
+  }
+}
+
+module.exports = { startTelegramBot, sendRequestToModel, forwardToModel, notifyModelCancelledByChatter, sendIdeaToModel, sendAnnouncementToModel };

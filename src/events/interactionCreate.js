@@ -3,6 +3,7 @@ const setRoleCmd = require('../commands/setrole');
 const { handleTicketInteraction } = require('../handlers/ticketHandler');
 const { handleContentIdeasInteraction, handleIdeasModalSubmit } = require('../handlers/contentIdeasHandler');
 const { handleGetNumberInteraction } = require('../handlers/getnumberHandler');
+const { handleAnnouncementInteraction } = require('../handlers/announcementHandler');
 
 module.exports = {
   name: 'interactionCreate',
@@ -47,6 +48,26 @@ module.exports = {
         await handleGetNumberInteraction(interaction);
       } catch (err) {
         console.error('[GetNumber] Interaction error:', err);
+        const msg = { content: '❌ Something went wrong.', ephemeral: true };
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(msg).catch(() => {});
+        } else {
+          await interaction.reply(msg).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    // ── Announcement (button + select + modal) ─────────────────────────────
+    if (
+      customId === 'announce_btn' ||
+      customId === 'announce_select' ||
+      customId === 'announce_modal'
+    ) {
+      try {
+        await handleAnnouncementInteraction(interaction);
+      } catch (err) {
+        console.error('[Announcement] Interaction error:', err);
         const msg = { content: '❌ Something went wrong.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(msg).catch(() => {});
