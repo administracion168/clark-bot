@@ -6,11 +6,10 @@ const {
 } = require('discord.js');
 
 // ── Grok config ───────────────────────────────────────────────────────────────
-// grok-2-1212: stable non-reasoning model, standard OpenAI-compatible responses.
-// grok-3-mini is a reasoning model and may return content in reasoning_content
-// instead of content when temperature != 1, causing empty translations.
+// grok-4.0-reasoning: reasoning model — requires temperature=1 and reasoning_effort.
+// Do NOT use temperature < 1 with reasoning models or content may come back empty.
 const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
-const GROK_MODEL   = 'grok-2-1212';
+const GROK_MODEL   = 'grok-4.0-reasoning';
 
 // ── System prompts ────────────────────────────────────────────────────────────
 
@@ -166,13 +165,14 @@ async function callGrok(systemPrompt, userText) {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model:       GROK_MODEL,
+      model:            GROK_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: userText },
       ],
-      temperature: 0.3,  // Low: consistent translations, not too rigid
-      max_tokens:  1024,
+      temperature:      1,     // Reasoning models require temperature=1
+      reasoning_effort: 'low', // Low effort: faster + cheaper for simple translations
+      max_tokens:       1024,
     }),
   });
 
