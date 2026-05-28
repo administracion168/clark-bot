@@ -4,6 +4,7 @@ const { handleTicketInteraction } = require('../handlers/ticketHandler');
 const { handleContentIdeasInteraction, handleIdeasModalSubmit } = require('../handlers/contentIdeasHandler');
 const { handleGetNumberInteraction } = require('../handlers/getnumberHandler');
 const { handleAnnouncementInteraction } = require('../handlers/announcementHandler');
+const { handleTranslatorInteraction } = require('../handlers/translatorHandler');
 
 module.exports = {
   name: 'interactionCreate',
@@ -69,6 +70,27 @@ module.exports = {
       } catch (err) {
         console.error('[Announcement] Interaction error:', err);
         const msg = { content: '❌ Something went wrong.', ephemeral: true };
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(msg).catch(() => {});
+        } else {
+          await interaction.reply(msg).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    // ── Translator (buttons + modals) ─────────────────────────────────────
+    if (
+      customId === 'translate_en_es' ||
+      customId === 'translate_es_en' ||
+      customId === 'translate_modal_en_es' ||
+      customId === 'translate_modal_es_en'
+    ) {
+      try {
+        await handleTranslatorInteraction(interaction);
+      } catch (err) {
+        console.error('[Translator] Interaction error:', err);
+        const msg = { content: '❌ Something went wrong with the translation.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(msg).catch(() => {});
         } else {

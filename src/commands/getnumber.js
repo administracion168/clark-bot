@@ -87,13 +87,31 @@ async function smsPoolRequest(endpoint, params = {}) {
 }
 
 async function smsPoolGetNumber() {
-  const data = await smsPoolRequest('purchase/sms', { country: 1, service: 457 });
-  if (!data.success || !data.number || !data.order_id) {
-    const msg = data.message || 'NO_NUMBERS';
-    console.error('[GetNumber/SMSPool] Unexpected buy response:', JSON.stringify(data).slice(0, 200));
-    throw new Error(msg.toUpperCase().replace(/ /g, '_').slice(0, 40));
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000;
+
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const data = await smsPoolRequest('purchase/sms', { country: 1, service: 457 });
+      if (!data.success || !data.number || !data.order_id) {
+        const msg = data.message || 'NO_NUMBERS';
+        console.error(`[GetNumber/SMSPool] Attempt ${attempt}/${MAX_RETRIES} — bad response:`, JSON.stringify(data).slice(0, 200));
+        throw new Error(msg.toUpperCase().replace(/ /g, '_').slice(0, 40));
+      }
+      if (attempt > 1) {
+        console.log(`[GetNumber/SMSPool] Succeeded on attempt ${attempt}/${MAX_RETRIES}`);
+      }
+      return { activationId: String(data.order_id), phoneNumber: data.number };
+    } catch (err) {
+      lastError = err;
+      const retryable = err.message === 'SERVICE_UNAVAILABLE' || err.message === 'NO_NUMBERS';
+      if (!retryable || attempt === MAX_RETRIES) throw err;
+      console.warn(`[GetNumber/SMSPool] Attempt ${attempt}/${MAX_RETRIES} failed (${err.message}), retrying in ${RETRY_DELAY_MS / 1000}s…`);
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    }
   }
-  return { activationId: String(data.order_id), phoneNumber: data.number };
+  throw lastError;
 }
 
 async function smsPoolCheckStatus(activationId) {
