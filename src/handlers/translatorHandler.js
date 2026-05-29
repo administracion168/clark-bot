@@ -87,10 +87,11 @@ FORMATTING RULES — APPLY TO EVERY OUTPUT WITHOUT EXCEPTION:
 - Write everything in lowercase only. No capital letters anywhere,
   not even at the start of the sentence or for proper names
 - Do NOT use apostrophes under any circumstance
-- The only punctuation marks allowed are: commas (,) and
-  ellipsis (...) — and only when genuinely needed for natural flow
-- No periods, no exclamation marks, no question marks, no dashes,
-  no colons, no semicolons, no parentheses, no quotation marks,
+- The only punctuation marks allowed are: commas (,),
+  question marks (?), and ellipsis (...) — and only when
+  genuinely needed for natural flow
+- No periods, no exclamation marks, no dashes, no colons,
+  no semicolons, no parentheses, no quotation marks,
   no any other punctuation symbol of any kind
 - If in doubt about whether to use punctuation, omit it`;
 
@@ -167,10 +168,11 @@ FORMATTING RULES — APPLY TO EVERY OUTPUT WITHOUT EXCEPTION:
 - Write everything in lowercase only. No capital letters anywhere,
   not even at the start of the sentence or for proper names
 - Do NOT use apostrophes under any circumstance
-- The only punctuation marks allowed are: commas (,) and
-  ellipsis (...) — and only when genuinely needed for natural flow
-- No periods, no exclamation marks, no question marks, no dashes,
-  no colons, no semicolons, no parentheses, no quotation marks,
+- The only punctuation marks allowed are: commas (,),
+  question marks (?), and ellipsis (...) — and only when
+  genuinely needed for natural flow
+- No periods, no exclamation marks, no dashes, no colons,
+  no semicolons, no parentheses, no quotation marks,
   no any other punctuation symbol of any kind
 - If in doubt about whether to use punctuation, omit it`;
 
