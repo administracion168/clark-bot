@@ -5,6 +5,7 @@ const { handleContentIdeasInteraction, handleIdeasModalSubmit } = require('../ha
 const { handleGetNumberInteraction } = require('../handlers/getnumberHandler');
 const { handleAnnouncementInteraction } = require('../handlers/announcementHandler');
 const { handleTranslatorInteraction } = require('../handlers/translatorHandler');
+const { handleProxyInteraction } = require('../handlers/proxyHandler');
 
 module.exports = {
   name: 'interactionCreate',
@@ -69,6 +70,22 @@ module.exports = {
         await handleAnnouncementInteraction(interaction);
       } catch (err) {
         console.error('[Announcement] Interaction error:', err);
+        const msg = { content: '❌ Something went wrong.', ephemeral: true };
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(msg).catch(() => {});
+        } else {
+          await interaction.reply(msg).catch(() => {});
+        }
+      }
+      return;
+    }
+
+    // ── Proxy rotation ────────────────────────────────────────────────────
+    if (customId === 'proxy_rotate_btn') {
+      try {
+        await handleProxyInteraction(interaction);
+      } catch (err) {
+        console.error('[Proxy] Interaction error:', err);
         const msg = { content: '❌ Something went wrong.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp(msg).catch(() => {});
